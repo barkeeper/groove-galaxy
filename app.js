@@ -221,8 +221,16 @@ const updateThemeIcon = () => { el.themeBtn.querySelector('.material-symbols-out
 el.themeBtn.addEventListener('click', () => { const n = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', n); localStorage.setItem('groove.theme', n); updateThemeIcon(); });
 updateThemeIcon();
 
-window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; el.installBtn.hidden = false; });
-el.installBtn.addEventListener('click', async () => { if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt = null; el.installBtn.hidden = true; } });
+// PWA install via our own header button. We intentionally do NOT call preventDefault() here:
+// on desktop there's no native mini-infobar to suppress, and calling it only makes Chrome log
+// "Banner not shown… must call prompt()". We just stash the event and fire prompt() on click.
+window.addEventListener('beforeinstallprompt', (e) => { deferredPrompt = e; el.installBtn.hidden = false; });
+el.installBtn.addEventListener('click', async () => {
+  if (!deferredPrompt) return;
+  const p = deferredPrompt; deferredPrompt = null; el.installBtn.hidden = true;
+  try { p.prompt(); await p.userChoice; } catch (e) { console.warn('install prompt unavailable:', e?.message || e); }
+});
+window.addEventListener('appinstalled', () => { deferredPrompt = null; el.installBtn.hidden = true; });
 
 // ---------- character ----------
 window.addEventListener('resize', () => face?.resize());
