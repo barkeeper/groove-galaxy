@@ -6,6 +6,7 @@ A single-page app where a **3D VRM character dances** to a set list of tracks �
 - **Motion** — [VRMA](https://github.com/pixiv/three-vrm/tree/dev/packages/three-vrm-animation) mocap clips: an intro walk-in, an ambient idle loop, and the music-paired dances.
 - **Set List** — pick a track on the right; she loops that dance while the song plays, with a live equalizer.
 - **Dance Floor** — pick an animated video backdrop; it crossfades in behind her while a dance plays and fades back to the still image when it ends.
+- **Models** — swap the dancer between VRM avatars (each with its own idle set); picking one persists it and reloads.
 
 ## Animation categories
 
@@ -14,6 +15,7 @@ A single-page app where a **3D VRM character dances** to a set list of tracks �
 | **Idle** | `VRMA_01` (intro) + `VRMA_02..07` | Auto-cycle whenever no dance is selected — the ambient "living" loop. |
 | **Dance** | `OtonaBlue`, `BabyYou`, `TocaToca`, `RareDance_3`, `RareDance_5`, `RabbitHole`, `Soiree`, `Kidding`, `BoomBoom`, `SakuyuiTaiso`, `Flower`, `BounceDance`, `March` | Listed in the Set List. Triggered by tap, looped until stopped, paired with `music/<name>.mp3`. |
 | **Dance Floor** | `assets/dancefloor/floor1..6.mp4` (+ `floorN.jpg` first-frame thumbs) | Animated backdrops; the picked one fades in behind the dancer while a dance plays. |
+| **Models** | `assets/avatar.vrm` (Sakura) + `assets/models/<id>.vrm` (+ `<id>.jpg` preview) | Swappable VRM dancers; each gets its own idle-clip subset. Only `.vrm` files work — Unity-package/FBX models need a Unity→VRM export first. |
 
 ## Run
 

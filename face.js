@@ -48,7 +48,7 @@ const DANCE_CLIPS = [
   'March.vrma',
 ];
 
-export async function createFace({ canvas, modelUrl }) {
+export async function createFace({ canvas, modelUrl, idleFiles }) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -166,7 +166,11 @@ export async function createFace({ canvas, modelUrl }) {
   // Best-effort: missing/optional clips just get skipped, they don't break boot.
   async function tryLoad(file) { try { return await loadClip(file); } catch (e) { console.warn(`[face] skipping ${file}: ${e?.message || e}`); return null; } }
   const introClip = await loadClip(VRMA_INTRO);
-  const idleClips = await Promise.all(VRMA_IDLE.map(loadClip));
+  // Per-model idle pool: a model can ship its own idle clips (passed in via idleFiles); otherwise
+  // everyone shares the pixiv pack. Missing files are skipped, and we fall back if none load.
+  const wantIdle = (Array.isArray(idleFiles) && idleFiles.length) ? idleFiles : VRMA_IDLE;
+  let idleClips = (await Promise.all(wantIdle.map(tryLoad))).filter(Boolean);
+  if (!idleClips.length) idleClips = (await Promise.all(VRMA_IDLE.map(tryLoad))).filter(Boolean);
   const danceClips = (await Promise.all(DANCE_CLIPS.map(tryLoad))).filter(Boolean);
 
   const mixer = new THREE.AnimationMixer(vrm.scene);

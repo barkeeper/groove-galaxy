@@ -31,6 +31,19 @@ explicit categories (see below) and only dances are listed.
   the UI (`playDance(name)`), **looped** while the matching `music/<name>.mp3` plays. When the track
   ends (or Stop is pressed) `idle()` crossfades back to the idle cycle.
 
+### Models (`app.js` MODELS + `assets/models/`)
+- The dancer is swappable. `MODELS` lists `{ id, name, url, idles }`; the current avatar is `Sakura`
+  (`assets/avatar.vrm`), the rest live in `assets/models/<id>.vrm` with a `<id>.jpg` portrait preview.
+- The **Models** picker sits in the right column between the Set List and the Dance Floor (50/25/25).
+  Picking a model persists it in `groove.model` and **reloads** — the cleanest way to re-init the rig and
+  re-retarget every dance/idle clip onto a new body (proportions, VRM0/1, spring bones all differ).
+- **Unique idles per character:** `face.createFace({ idleFiles })` takes a per-model idle list, so each
+  character idles differently. `idles:null` uses the shared pixiv pool; otherwise a subset (e.g. Kamome =
+  spin/model-pose/greeting, Papeko = shoot/squat/peace). (The BOOTH model packs don't ship idle
+  animations, so genuine per-character idle *clips* aren't available — we vary the shared pool instead.)
+- **Format caveat:** only real `.vrm` files load. Several BOOTH models ship as Unity packages / FBX / Maya
+  (no `.vrm`), which need a Unity + UniVRM export first; those are skipped until a `.vrm` is provided.
+
 ### Dance floor (`app.js` + `assets/dancefloor/`)
 - Right column is split: **Set List** (60%) + **Dance Floor** picker (40%, 6 first-frame thumbnails).
 - `FLOORS` lists `floor1..6`; the picked id persists in `groove.floor`. A single `<video id="floor">`

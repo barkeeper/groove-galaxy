@@ -31,15 +31,26 @@ const DANCES = [
 // The selected one fades in behind the dancer while a dance plays, then fades back to the still image.
 const FLOORS = [1, 2, 3, 4, 5, 6].map((n) => ({ id: `floor${n}` }));
 
+// Models — the dancer can be swapped. Each VRM lives in ./assets/models/<id>.vrm (+ <id>.jpg preview).
+// `idles` is a per-model idle-animation list (./assets/vrma/...) so each character idles differently;
+// null = the shared pixiv idle pool. Picking a model persists it and reloads (clean re-init of the
+// rig + re-retargeting of every clip onto the new body).
+const MODELS = [
+  { id: 'avatar', name: 'Sakura', url: A.face,                       idles: null },
+  { id: 'kamome', name: 'Kamome', url: './assets/models/kamome.vrm', idles: ['VRMA_05.vrma', 'VRMA_06.vrma', 'VRMA_02.vrma'] },
+  { id: 'papeko', name: 'Papeko', url: './assets/models/papeko.vrm', idles: ['VRMA_04.vrma', 'VRMA_07.vrma', 'VRMA_03.vrma'] },
+];
+
 const MUSIC_DELAY_MS = 1200;  // let the dance wind up before the track drops in
 const DEFAULT_VOLUME = 0.5;    // 50% on first run
 const DEFAULT_FLOOR = 'floor1';
+const DEFAULT_MODEL = 'avatar';
 
 // ---------- DOM ----------
 const $ = (id) => document.getElementById(id);
 const el = {
   faceCanvas: $('face'), faceFallback: $('faceFallback'), wave: $('wave'),
-  tracks: $('tracks'), floors: $('floors'), floor: $('floor'),
+  tracks: $('tracks'), floors: $('floors'), floor: $('floor'), models: $('models'),
   muteBtn: $('muteBtn'), volume: $('volume'), themeBtn: $('themeBtn'), installBtn: $('installBtn'),
   np: $('nowplaying'), npText: $('npText'),
 };
@@ -49,6 +60,7 @@ const settings = {
   muted: localStorage.getItem('groove.muted') === '1',
   volume: storedVol == null ? DEFAULT_VOLUME : Math.max(0, Math.min(1, +storedVol || 0)),
   floor: localStorage.getItem('groove.floor') || DEFAULT_FLOOR,
+  model: localStorage.getItem('groove.model') || DEFAULT_MODEL,
 };
 
 let face = null;
@@ -125,6 +137,34 @@ function buildFloors() {
     el.floors.appendChild(li);
   });
   markFloorSelected(settings.floor);
+}
+
+// ---------- model picker (swap the dancer; persists + reloads for a clean rig re-init) ----------
+function markModelSelected(id) {
+  for (const li of el.models.querySelectorAll('.model-thumb')) li.classList.toggle('is-selected', li.dataset.id === id);
+}
+function selectModel(id) {
+  if (id === settings.model) return;
+  localStorage.setItem('groove.model', id);
+  location.reload();   // a reload re-inits the rig and re-retargets every dance/idle clip to the new body
+}
+function buildModels() {
+  el.models.innerHTML = '';
+  MODELS.forEach((m) => {
+    const li = document.createElement('li');
+    li.className = 'model-thumb'; li.dataset.id = m.id; li.tabIndex = 0; li.setAttribute('role', 'button');
+    li.setAttribute('aria-label', `Dancer ${m.name}`);
+    li.innerHTML =
+      `<span class="model-thumb__ph material-symbols-outlined" aria-hidden="true">person</span>` +
+      `<img src="./assets/models/${m.id}.jpg" alt="" loading="lazy" />` +
+      `<span class="model-thumb__name">${m.name}</span>` +
+      `<span class="floor-thumb__check material-symbols-outlined">check</span>`;
+    li.querySelector('img').addEventListener('error', (e) => { e.target.style.display = 'none'; });
+    li.addEventListener('click', () => selectModel(m.id));
+    li.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectModel(m.id); } });
+    el.models.appendChild(li);
+  });
+  markModelSelected(settings.model);
 }
 
 // Stop the current dance: kill the music and crossfade the body back to the idle cycle.
@@ -239,11 +279,13 @@ el.faceCanvas.addEventListener('pointerleave', () => face?.setGazeTarget(0, 0));
 
 // ---------- boot ----------
 buildSetList();   // show the list immediately (clicks no-op until the model is ready)
+buildModels();    // dancer picker
 buildFloors();    // dance-floor picker
 drawWave();
 (async () => {
   try {
-    face = await createFace({ canvas: el.faceCanvas, modelUrl: A.face });
+    const model = MODELS.find((m) => m.id === settings.model) || MODELS[0];
+    face = await createFace({ canvas: el.faceCanvas, modelUrl: model.url, idleFiles: model.idles });
     buildSetList();   // re-render now that we know which clips actually loaded
   } catch (e) {
     console.error('Character init failed:', e);
