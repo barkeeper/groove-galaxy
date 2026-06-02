@@ -38,6 +38,14 @@ const DANCE_CLIPS = [
   'TocaToca.vrma',
   'RareDance_3.vrma',
   'RareDance_5.vrma',
+  'RabbitHole.vrma',
+  'Soiree.vrma',
+  'Kidding.vrma',
+  'BoomBoom.vrma',
+  'SakuyuiTaiso.vrma',
+  'Flower.vrma',
+  'BounceDance.vrma',
+  'March.vrma',
 ];
 
 export async function createFace({ canvas, modelUrl }) {
@@ -116,6 +124,36 @@ export async function createFace({ canvas, modelUrl }) {
   }
   reframe();
 
+  // ---- bottom anchor ----
+  // Some VRMA clips bake vertical root/hips translation, so in the fixed frame the whole
+  // body slowly sinks (or floats) and she changes apparent position between emotions/dances.
+  // We pin the lowest foot to a constant floor line (measured once at rest) every frame, with
+  // a small tolerance so natural bounce of a few pixels still reads. Pose-driven dips (a squat
+  // bending the knees) keep the feet planted, so they pass through untouched.
+  const footNodes = ['leftToes', 'rightToes', 'leftFoot', 'rightFoot']
+    .map((n) => vrm.humanoid?.getRawBoneNode?.(n)).filter(Boolean);
+  const _footV = new THREE.Vector3();
+  const lowestFootY = () => {
+    let min = Infinity;
+    for (const n of footNodes) { n.getWorldPosition(_footV); if (_footV.y < min) min = _footV.y; }
+    return isFinite(min) ? min : null;
+  };
+  const FLOOR_Y = lowestFootY() ?? 0;   // rest-pose feet height (model offset still 0 here)
+  const FOOT_TOL = 0.02;                 // ~a few px of slack — small bounce stays
+  let footOffsetY = 0;
+  function anchorFeet() {
+    if (!footNodes.length) return;
+    const fy = lowestFootY();
+    if (fy == null) return;
+    const dev = FLOOR_Y - fy;            // >0 → foot below floor (sinking); <0 → lifted (hop)
+    // Hard floor downward — corrected fully in THIS frame (before render) so even a fast root
+    // drop can never visibly sink her below the floor line. Soft pull when she floats above it,
+    // so genuine hops/bounce still read and a higher-baseline clip eases back down.
+    if (dev > FOOT_TOL)        footOffsetY += (dev - FOOT_TOL);         // full: never sinks
+    else if (dev < -FOOT_TOL)  footOffsetY += (dev + FOOT_TOL) * 0.2;   // gentle: keep the hop
+    vrm.scene.position.y = footOffsetY;
+  }
+
   // ---- load VRMA clips (intro + idle pool + optional rare pool) ----
   async function loadClip(file) {
     const g = await loader.loadAsync(VRMA_BASE + file);
@@ -181,6 +219,7 @@ export async function createFace({ canvas, modelUrl }) {
         currentClip: currentAction?.getClip()?.name || null,
         idleCount: idleClips.length,
       }),
+      anchor: () => ({ floorY: FLOOR_Y, footY: lowestFootY(), offset: footOffsetY }),
       playDance: (name) => { const c = danceByName.get(name); if (!c) return `no clip: ${name}`; queuedClip = null; playClip(c, { fade: 0.4, loop: true }); return `playing: ${c.name}`; },
       // debug: sample a few humanoid bone rotations so a test can detect whether a clip
       // is actually driving the rig (motion) vs. loaded-but-inert (no retargeted tracks).
@@ -242,6 +281,7 @@ export async function createFace({ canvas, modelUrl }) {
     lookTarget.position.set(gaze.x * 1.6, gaze.y * 1.1, -3);
 
     vrm.update(dt);   // bone updates, expressions, lookAt, spring physics
+    anchorFeet();     // keep her planted on the floor line (after the rig is posed for this frame)
 
     renderer.render(scene, camera);
     } catch (e) { // a transient GPU/context hiccup (e.g. under heavy LLM-on-GPU load) must not freeze the avatar

@@ -1,14 +1,31 @@
 // unity-anim-to-vrma.mjs — convert a Unity Humanoid AnimationClip (.anim YAML)
 // into a VRMA (.vrma) file: glTF binary + VRMC_vrm_animation extension.
 //
-// Limitations:
-//   • Uses Unity's DEFAULT muscle min/max ranges (the original avatar's calibration
-//     isn't accessible from the clip alone), so extreme poses may be over/undershoot.
-//   • Finger curves, blend shapes, eye muscles, jaw, and IK target curves are ignored.
-//   • Root translation is applied to the hips bone.
+// Every humanoid bone is driven by Unity's muscle curves (the canonical Mecanim humanoid
+// representation). The muscle→bone-rotation mapping is taken from tools/muscle-calib.json
+// (fit once from a known-good reference clip by tools/calibrate-muscles.mjs); without it the
+// code falls back to a crude default-range Euler approximation. Hips get RootQ (also calibrated
+// into the VRM coordinate convention); root translation is applied to the hips bone.
+//
+// Limitations: finger curves, blend shapes, eye/jaw muscles are ignored; the calibration is a
+// per-bone linear-in-rotation-vector fit, so very large 3-DOF shoulder poses can drift a little.
 //
 // Usage: node tools/unity-anim-to-vrma.mjs <input.anim> <output.vrma>
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { sample, extractCurves, expmapToQuat, quatToLog } from './anim-muscle.mjs';
+
+// Optional empirical calibration produced by tools/calibrate-muscles.mjs from a known-good reference
+// clip: bone -> { muscles:[names in order], M:[3][n], b:[3] }. When present, a calibrated bone's
+// local rotation is rotvec = M·(muscle values) + b → quaternion — reproducing the rig's real
+// Mecanim muscle→bone mapping instead of the crude default-range Euler fallback below.
+const CALIB = (() => {
+  try {
+    const p = path.join(path.dirname(fileURLToPath(import.meta.url)), 'muscle-calib.json');
+    return fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : {};
+  } catch { return {}; }
+})();
 
 // ---------- Unity default muscle definitions ----------
 // Each entry: [muscleName, bone, axis, defaultMin (deg), defaultMax (deg)]
@@ -101,53 +118,7 @@ const HUMANOID_TREE = [
 ];
 const HUMANOID_BONES = HUMANOID_TREE.map(([n]) => n);
 
-// ---------- minimal YAML extractor for Unity AnimationClip ----------
-// Doesn't parse the whole file (it's 540k lines). Instead scans for
-// `m_FloatCurves` entries with `attribute: "<muscle name>"` and pulls
-// out time/value pairs from the curve keyframes.
-function extractCurves(text) {
-  const out = new Map(); // attribute -> [{time, value}, ...]
-
-  const wanted = new Set(MUSCLES.map(m => m[0]));
-  // Root motion: hips position + body rotation
-  for (const c of ['RootT.x','RootT.y','RootT.z','RootQ.x','RootQ.y','RootQ.z','RootQ.w']) wanted.add(c);
-  // IK target translations + rotations for hands & feet — needed for legs to move
-  // (Mecanim dances often use IK targets, not FK muscles, for legs)
-  for (const side of ['Left','Right']) {
-    for (const part of ['Hand','Foot']) {
-      for (const c of ['T.x','T.y','T.z','Q.x','Q.y','Q.z','Q.w']) wanted.add(`${side}${part}${c}`);
-    }
-  }
-
-  // Split on each `- curve:` block under `m_FloatCurves`. Each block contains a
-  // m_Curve array of keyframes plus an `attribute: <name>` and `path:` field.
-  // We scan linearly because the file is huge but flat.
-  const blocks = text.split(/\n  - curve:\n/);
-  for (let i = 1; i < blocks.length; i++) {
-    const blk = blocks[i];
-    // attribute can be quoted "Name" or bare Name; cut at end of line/quote
-    const aMatch = blk.match(/\n    attribute:\s*"?([^"\n]+?)"?\n/);
-    if (!aMatch) continue;
-    const attr = aMatch[1].trim();
-    if (!wanted.has(attr)) continue;
-    const keys = [];
-    const keyRx = /\n      - serializedVersion:[\s\S]*?\n        time:\s*([\-0-9.eE]+)\n        value:\s*([\-0-9.eE]+)/g;
-    let m; while ((m = keyRx.exec(blk)) !== null) keys.push({ t: +m[1], v: +m[2] });
-    if (keys.length) out.set(attr, keys);
-  }
-  return out;
-}
-
-// Sample a piecewise-linear interpolation of {t,v} keyframes at time t.
-function sample(keys, t) {
-  if (!keys || !keys.length) return 0;
-  if (t <= keys[0].t) return keys[0].v;
-  if (t >= keys[keys.length - 1].t) return keys[keys.length - 1].v;
-  let lo = 0, hi = keys.length - 1;
-  while (lo + 1 < hi) { const mid = (lo + hi) >> 1; if (keys[mid].t <= t) lo = mid; else hi = mid; }
-  const a = keys[lo], b = keys[hi]; const f = (t - a.t) / (b.t - a.t);
-  return a.v + (b.v - a.v) * f;
-}
+// (extractCurves + sample now live in ./anim-muscle.mjs, shared with the calibration tool.)
 
 // Muscle normalized value [-1,1] → angle in radians, using Unity's default range.
 // Negative muscle uses min, positive uses max; rest at 0.
@@ -171,59 +142,7 @@ function eulerXYZToQuat(rx, ry, rz) {
   ];
 }
 
-// Hamilton quaternion product (xyzw order)
-function quatMul(a, b) {
-  return [
-    a[3]*b[0] + a[0]*b[3] + a[1]*b[2] - a[2]*b[1],
-    a[3]*b[1] - a[0]*b[2] + a[1]*b[3] + a[2]*b[0],
-    a[3]*b[2] + a[0]*b[1] - a[1]*b[0] + a[2]*b[3],
-    a[3]*b[3] - a[0]*b[0] - a[1]*b[1] - a[2]*b[2],
-  ];
-}
 function quatNormalize(q) { const l = Math.hypot(q[0], q[1], q[2], q[3]) || 1; return [q[0]/l, q[1]/l, q[2]/l, q[3]/l]; }
-
-// 2-bone analytic IK in a chain (hip→knee→foot or shoulder→elbow→hand).
-// Inputs: chain root pos (rest, local to its parent's frame), target pos (same frame),
-// upper bone length L1, lower bone length L2, "down" axis for natural bend direction.
-// Returns: { upperQuat, lowerQuat } as local rotation quaternions.
-// Assumes the chain at rest lies along the negative Y axis (legs hang down; arms hang down).
-// The bend axis is +X by default (knee bends forward); pass {bendAxis:'-x'} for opposite.
-function twoBoneIK(targetX, targetY, targetZ, L1, L2, bendDir = 1) {
-  let dx = targetX, dy = targetY, dz = targetZ;
-  let D = Math.hypot(dx, dy, dz);
-  const maxR = L1 + L2 - 1e-4;
-  const minR = Math.abs(L1 - L2) + 1e-4;
-  if (D > maxR) { const s = maxR / D; dx *= s; dy *= s; dz *= s; D = maxR; }
-  else if (D < minR) { const s = minR / D; dx *= s; dy *= s; dz *= s; D = minR; }
-  // Knee angle (interior angle at knee); π = straight, smaller = more bent
-  const cosKnee = (L1*L1 + L2*L2 - D*D) / (2*L1*L2);
-  const knee = Math.acos(Math.max(-1, Math.min(1, cosKnee)));
-  const kneeBend = Math.PI - knee;          // rotate lower bone by this (around bend axis)
-
-  // Hip pitch: angle between chain at rest (downward, -Y in this frame) and the line
-  // from root to a point along the bent chain that reaches the target. We compute the
-  // hip→foot direction, then offset by the "half-angle" of the bend along bend axis.
-  // Simplest robust approach: rotate the -Y vector to the (dx,dy,dz) direction, then
-  // pre-rotate by half the bend offset.
-  const tlen = Math.hypot(dx, dy, dz) || 1;
-  const tx = dx / tlen, ty = dy / tlen, tz = dz / tlen;
-  // angle between (0,-1,0) and (tx,ty,tz)
-  const cosA = -ty; // dot((0,-1,0),(tx,ty,tz)) = -ty
-  const ang = Math.acos(Math.max(-1, Math.min(1, cosA)));
-  // axis is (0,-1,0) × (tx,ty,tz) = (-tz, 0, tx), normalised
-  let ax = -tz, ay = 0, az = tx;
-  const al = Math.hypot(ax, az) || 1; ax /= al; az /= al;
-  const sA = Math.sin(ang / 2), cA = Math.cos(ang / 2);
-  const aim = [ax * sA, ay * sA, az * sA, cA];
-
-  // Knee bend pre-rotation around +X (forward bend) by half of kneeBend, then a
-  // matching post-rotation on the lower bone by the remaining kneeBend.
-  const half = kneeBend / 2;
-  const preX = [bendDir * Math.sin(half), 0, 0, Math.cos(half)];
-  const upperQuat = quatNormalize(quatMul(aim, preX));
-  const lowerQuat = [bendDir * Math.sin(kneeBend / 2), 0, 0, Math.cos(kneeBend / 2)];
-  return { upperQuat, lowerQuat: quatNormalize(lowerQuat) };
-}
 
 // ---------- main ----------
 const [inPath, outPath] = process.argv.slice(2);
@@ -233,8 +152,10 @@ const text = fs.readFileSync(inPath, 'utf8');
 const stopTime = parseFloat((text.match(/m_StopTime:\s*([\-0-9.eE]+)/) || [])[1] || '0');
 const sampleRate = parseFloat((text.match(/m_SampleRate:\s*([\-0-9.eE]+)/) || [])[1] || '30');
 if (!stopTime) { console.error('no m_StopTime'); process.exit(1); }
-const curves = extractCurves(text);
-console.log(`parsed ${curves.size} curves; duration ${stopTime.toFixed(2)}s @ ${sampleRate}fps`);
+const wanted = new Set(MUSCLES.map((m) => m[0]));
+for (const c of ['RootT.x','RootT.y','RootT.z','RootQ.x','RootQ.y','RootQ.z','RootQ.w']) wanted.add(c);
+const curves = extractCurves(text, wanted);
+console.log(`parsed ${curves.size} curves; duration ${stopTime.toFixed(2)}s @ ${sampleRate}fps; calibrated bones: ${Object.keys(CALIB).length}`);
 
 // Per-bone muscle list for fast frame composition
 const bonePerturb = new Map(); // bone -> [{name, axis, min, max, keys}]
@@ -250,38 +171,6 @@ console.log('animated bones:', [...bonePerturb.keys()].join(', '));
 const rtx = curves.get('RootT.x'), rty = curves.get('RootT.y'), rtz = curves.get('RootT.z');
 const rqx = curves.get('RootQ.x'), rqy = curves.get('RootQ.y'), rqz = curves.get('RootQ.z'), rqw = curves.get('RootQ.w');
 const rootRef = { x: sample(rtx, 0), y: sample(rty, 0), z: sample(rtz, 0) };
-
-// IK target curves for hands/feet — Mecanim normalized humanoid space.
-// Hand/foot Q is the target rotation; T is the target translation relative to the root.
-const ik = {};
-for (const side of ['Left','Right']) for (const part of ['Hand','Foot']) {
-  ik[side + part] = {
-    tx: curves.get(`${side}${part}T.x`), ty: curves.get(`${side}${part}T.y`), tz: curves.get(`${side}${part}T.z`),
-    qx: curves.get(`${side}${part}Q.x`), qy: curves.get(`${side}${part}Q.y`), qz: curves.get(`${side}${part}Q.z`), qw: curves.get(`${side}${part}Q.w`),
-  };
-}
-
-// Approximate rest positions (relative to root/hips) for IK chain roots, derived from
-// HUMANOID_TREE offsets. Used as the "zero" point for foot/hand IK targets.
-function chainRestPos(boneName) {
-  let pos = [0, 0, 0];
-  let cur = boneName;
-  while (cur) {
-    const e = HUMANOID_TREE.find(([n]) => n === cur);
-    if (!e) break;
-    pos = [pos[0] + e[2][0], pos[1] + e[2][1], pos[2] + e[2][2]];
-    cur = e[1];
-  }
-  return pos;
-}
-const restHip = chainRestPos('hips');
-const restLeftShoulder = chainRestPos('leftUpperArm');
-const restRightShoulder = chainRestPos('rightUpperArm');
-const restLeftHip = chainRestPos('leftUpperLeg');
-const restRightHip = chainRestPos('rightUpperLeg');
-// Chain lengths (from HUMANOID_TREE — they're constant per rig)
-const LEG_UPPER = 0.40, LEG_LOWER = 0.40;
-const ARM_UPPER = 0.25, ARM_LOWER = 0.25;
 
 const fps = sampleRate;
 const frames = Math.max(2, Math.round(stopTime * fps) + 1);
@@ -311,66 +200,50 @@ for (let f = 0; f < frames; f++) {
   hipsTrans[f * 3 + 1] = sample(rty, t) - rootRef.y;
   hipsTrans[f * 3 + 2] = sample(rtz, t) - rootRef.z;
 
-  // ---- per-bone muscle composition (spine/chest/neck/head/arms/legs) ----
-  const boneEuler = new Map();
-  for (const [bone, perturbs] of bonePerturb) {
-    let rx = 0, ry = 0, rz = 0;
-    for (const p of perturbs) {
-      const v = sample(p.keys, t);
-      const ang = muscleToRad(v, p.min, p.max);
-      if (p.axis === 'x') rx += ang; else if (p.axis === 'y') ry += ang; else rz += ang;
-    }
-    boneEuler.set(bone, [rx, ry, rz]);
-  }
   function setBoneQuat(bone, q) {
     const arr = boneQuats.get(bone);
     if (!arr) return;
     arr[f * 4 + 0] = q[0]; arr[f * 4 + 1] = q[1]; arr[f * 4 + 2] = q[2]; arr[f * 4 + 3] = q[3];
   }
-  for (const [bone, e] of boneEuler) setBoneQuat(bone, eulerXYZToQuat(e[0], e[1], e[2]));
+  // ---- per-bone rotation from muscles ----
+  // Calibrated bones: rotvec = M·(muscle values, in calib order) + b → quaternion (matches the
+  // rig's real Mecanim mapping). Uncalibrated bones fall back to crude per-axis Euler.
+  for (const [bone, perturbs] of bonePerturb) {
+    const cal = CALIB[bone];
+    if (cal) {
+      const v = cal.muscles.map((name) => sample(curves.get(name), t));
+      const r = [cal.b[0], cal.b[1], cal.b[2]];
+      for (let k = 0; k < 3; k++) for (let j = 0; j < v.length; j++) r[k] += cal.M[k][j] * v[j];
+      setBoneQuat(bone, expmapToQuat(r));
+    } else {
+      let rx = 0, ry = 0, rz = 0;
+      for (const p of perturbs) {
+        const ang = muscleToRad(sample(p.keys, t), p.min, p.max);
+        if (p.axis === 'x') rx += ang; else if (p.axis === 'y') ry += ang; else rz += ang;
+      }
+      setBoneQuat(bone, eulerXYZToQuat(rx, ry, rz));
+    }
+  }
 
   // ---- root rotation → hips ----
-  // Mecanim's RootQ is the whole-body rotation. Apply on top of any spine muscle-driven
-  // rotation at the hips (which our muscle table puts on 'spine', not 'hips' — so this
-  // is the only thing rotating hips).
+  // Mecanim's RootQ is the whole-body rotation. The calibrated 'hips' entry maps it (as a
+  // rotation-vector) into the VRM's coordinate convention; without calibration we apply RootQ raw.
   if (rqw && rqw.length) {
-    const rq = [sample(rqx, t), sample(rqy, t), sample(rqz, t), sample(rqw, t)];
-    setBoneQuat('hips', quatNormalize(rq));
+    const rq = quatNormalize([sample(rqx, t), sample(rqy, t), sample(rqz, t), sample(rqw, t)]);
+    const ch = CALIB.hips;
+    if (ch && ch.rootq) {
+      const rqv = quatToLog(rq);
+      const r = [ch.b[0], ch.b[1], ch.b[2]];
+      for (let k = 0; k < 3; k++) for (let j = 0; j < 3; j++) r[k] += ch.M[k][j] * rqv[j];
+      setBoneQuat('hips', expmapToQuat(r));
+    } else {
+      setBoneQuat('hips', rq);
+    }
   }
 
-  // ---- foot IK: legs ----
-  // Foot target T is in normalized humanoid space relative to root. We approximate by
-  // treating it as meters relative to the rest hip position. This is rough but enough
-  // to make legs move when a dance pins feet to specific positions.
-  function applyLegIK(side, restHipPos, upperBone, lowerBone, footBone) {
-    const ikd = ik[side + 'Foot']; if (!ikd.tx) return;
-    // foot target world-ish position
-    const fx = sample(ikd.tx, t), fy = sample(ikd.ty, t), fz = sample(ikd.tz, t);
-    // relative to leg root (hip socket)
-    const lx = fx - restHipPos[0], ly = fy - restHipPos[1], lz = fz - restHipPos[2];
-    const { upperQuat, lowerQuat } = twoBoneIK(lx, ly, lz, LEG_UPPER, LEG_LOWER, 1);
-    setBoneQuat(upperBone, upperQuat);
-    setBoneQuat(lowerBone, lowerQuat);
-    if (ikd.qw) setBoneQuat(footBone, quatNormalize([sample(ikd.qx, t), sample(ikd.qy, t), sample(ikd.qz, t), sample(ikd.qw, t)]));
-  }
-  applyLegIK('Left',  restLeftHip,  'leftUpperLeg',  'leftLowerLeg',  'leftFoot');
-  applyLegIK('Right', restRightHip, 'rightUpperLeg', 'rightLowerLeg', 'rightFoot');
-
-  // ---- hand IK: arms ----
-  function applyArmIK(side, restShoulderPos, upperBone, lowerBone, handBone) {
-    const ikd = ik[side + 'Hand']; if (!ikd.tx) return;
-    const hx = sample(ikd.tx, t), hy = sample(ikd.ty, t), hz = sample(ikd.tz, t);
-    const lx = hx - restShoulderPos[0], ly = hy - restShoulderPos[1], lz = hz - restShoulderPos[2];
-    // For arms, the chain at rest also points down (-Y) after our muscle pose; bend axis
-    // is opposite for left vs right elbow (elbows bend inward).
-    const bend = side === 'Left' ? -1 : 1;
-    const { upperQuat, lowerQuat } = twoBoneIK(lx, ly, lz, ARM_UPPER, ARM_LOWER, bend);
-    setBoneQuat(upperBone, upperQuat);
-    setBoneQuat(lowerBone, lowerQuat);
-    if (ikd.qw) setBoneQuat(handBone, quatNormalize([sample(ikd.qx, t), sample(ikd.qy, t), sample(ikd.qz, t), sample(ikd.qw, t)]));
-  }
-  applyArmIK('Left',  restLeftShoulder,  'leftUpperArm',  'leftLowerArm',  'leftHand');
-  applyArmIK('Right', restRightShoulder, 'rightUpperArm', 'rightLowerArm', 'rightHand');
+  // (Limbs are driven entirely by muscle FK above. The old analytic foot/hand IK override was
+  // removed: it assumed limbs rest along -Y and forced full extension, so elbows/knees never bent
+  // and the raw foot IK-target quaternion became a bad local rotation — collapsed ankles.)
 }
 
 // Ensure hips has a quaternion track (identity if no muscles drove it)

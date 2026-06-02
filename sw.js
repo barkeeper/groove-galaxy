@@ -1,9 +1,9 @@
 // sw.js — offline support for Groove Galaxy.
 // • App shell precached on install (list shared with the app via shell-files.json).
 // • same-origin code (js/css/html): network-first (so edits show), fall back to cache.
-// • same-origin static assets (vrm/vrma/img/mp3/fonts): stale-while-revalidate (instant, self-updating).
+// • same-origin static assets (vrm/vrma/img/audio/video/fonts): stale-while-revalidate (instant, self-updating).
 // • CDN (three.js / three-vrm / fonts): cache-first (version-pinned, immutable).
-const CACHE = 'groove-v1';
+const CACHE = 'groove-v2';
 const SHELL_FALLBACK = ['./', './index.html', './app.js', './face.js', './styles.css', './manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
@@ -32,7 +32,7 @@ self.addEventListener('fetch', (e) => {
   const sameOrigin = url.origin === self.location.origin;
   if (!sameOrigin && !isCDN(url.host)) return; // not ours to handle
 
-  const isStaticAsset = /\.(vrm|vrma|png|jpe?g|webp|gif|woff2?|ico|mp3|ogg|m4a|svg)$/i.test(url.pathname);
+  const isStaticAsset = /\.(vrm|vrma|png|jpe?g|webp|gif|woff2?|ico|mp3|ogg|m4a|mp4|webm|mov|svg)$/i.test(url.pathname);
 
   if (sameOrigin && isStaticAsset) {
     // stale-while-revalidate

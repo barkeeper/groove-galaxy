@@ -15,18 +15,32 @@ const DANCES = [
   { id: 'OtonaBlue',   title: 'Otona Blue',   artist: 'New Jeans' },
   { id: 'BabyYou',     title: 'Baby You',     artist: 'Groove Galaxy' },
   { id: 'TocaToca',    title: 'Toca Toca',    artist: 'Fly Project' },
-  { id: 'RareDance_3', title: 'Rare Dance 3', artist: 'Encore' },
-  { id: 'RareDance_5', title: 'Rare Dance 5', artist: 'Encore' },
+  { id: 'RareDance_3', title: 'Sorry for Being Cute', artist: 'HoneyWorks' },
+  { id: 'RareDance_5', title: 'Rhapsody of Blue Sky', artist: 'fhána' },
+  { id: 'RabbitHole',  title: 'Rabbit Hole',          artist: 'DECO*27' },
+  { id: 'Soiree',       title: 'Soirée',                            artist: 'Hoshimachi Suisei' },
+  { id: 'Kidding',      title: 'Kidding',                           artist: 'ISEGYE IDOL' },
+  { id: 'BoomBoom',     title: 'Eve, Psyche & the Bluebeard’s Wife', artist: 'LE SSERAFIM' },
+  { id: 'SakuyuiTaiso', title: 'Sakuyui Exercise',                  artist: 'Sakuyui' },
+  { id: 'Flower',       title: 'FLOWER',                            artist: 'JISOO' },
+  { id: 'BounceDance',  title: 'TiK ToK',                           artist: 'Kesha' },
+  { id: 'March',        title: 'March!!',                           artist: 'MaiR' },
 ];
+
+// Dance floors — animated video backdrops in ./assets/dancefloor/<id>.mp4 (+ <id>.jpg first-frame thumb).
+// The selected one fades in behind the dancer while a dance plays, then fades back to the still image.
+const FLOORS = [1, 2, 3, 4, 5, 6].map((n) => ({ id: `floor${n}` }));
 
 const MUSIC_DELAY_MS = 1200;  // let the dance wind up before the track drops in
 const DEFAULT_VOLUME = 0.5;    // 50% on first run
+const DEFAULT_FLOOR = 'floor1';
 
 // ---------- DOM ----------
 const $ = (id) => document.getElementById(id);
 const el = {
   faceCanvas: $('face'), faceFallback: $('faceFallback'), wave: $('wave'),
-  tracks: $('tracks'), stopBtn: $('stopBtn'), muteBtn: $('muteBtn'), volume: $('volume'), themeBtn: $('themeBtn'), installBtn: $('installBtn'),
+  tracks: $('tracks'), floors: $('floors'), floor: $('floor'),
+  muteBtn: $('muteBtn'), volume: $('volume'), themeBtn: $('themeBtn'), installBtn: $('installBtn'),
   np: $('nowplaying'), npText: $('npText'),
 };
 
@@ -34,10 +48,11 @@ const storedVol = localStorage.getItem('groove.volume');
 const settings = {
   muted: localStorage.getItem('groove.muted') === '1',
   volume: storedVol == null ? DEFAULT_VOLUME : Math.max(0, Math.min(1, +storedVol || 0)),
+  floor: localStorage.getItem('groove.floor') || DEFAULT_FLOOR,
 };
 
 let face = null;
-let audio = null, audioTimer = null, current = null, deferredPrompt = null;
+let audio = null, audioTimer = null, current = null, deferredPrompt = null, floorPauseTimer = null;
 let audioCtx = null, analyser = null, freqBuf = null;
 
 // ---------- audio graph (lazy — needs a user gesture to start) ----------
@@ -59,17 +74,63 @@ function stopMusic() {
 
 // ---------- now-playing + set-list state ----------
 function markActive(id) {
-  for (const li of el.tracks.querySelectorAll('.track')) li.classList.toggle('is-playing', li.dataset.id === id);
+  for (const li of el.tracks.querySelectorAll('.track')) {
+    const playing = li.dataset.id === id;
+    li.classList.toggle('is-playing', playing);
+    const glyph = li.querySelector('.track__glyph .material-symbols-outlined');
+    if (glyph) glyph.textContent = playing ? 'stop' : 'play_arrow';   // swap play ⇄ stop right on the row
+  }
 }
 function setNowPlaying(d) {
   el.np.dataset.active = d ? 'true' : 'false';
   el.npText.textContent = d ? d.title : 'idle';
-  el.stopBtn.hidden = !d;
+}
+
+// ---------- dance-floor background (video over the still image) ----------
+function floorSrc(id) { return `./assets/dancefloor/${id}.mp4`; }
+// Fade the selected floor video in (called when a dance starts).
+function showFloor() {
+  clearTimeout(floorPauseTimer);
+  const src = floorSrc(settings.floor);
+  if (el.floor.getAttribute('src') !== src) el.floor.setAttribute('src', src);
+  el.floor.play?.().catch((e) => console.warn('floor video failed:', e?.message || e));
+  el.floor.classList.add('is-active');
+}
+// Fade the floor out, revealing the still image; pause once the crossfade finishes.
+function hideFloor() {
+  el.floor.classList.remove('is-active');
+  clearTimeout(floorPauseTimer);
+  floorPauseTimer = setTimeout(() => { try { el.floor.pause(); } catch {} }, 950); // matches the .9s opacity fade
+}
+function markFloorSelected(id) {
+  for (const li of el.floors.querySelectorAll('.floor-thumb')) li.classList.toggle('is-selected', li.dataset.id === id);
+}
+function selectFloor(id) {
+  settings.floor = id; localStorage.setItem('groove.floor', id);
+  markFloorSelected(id);
+  if (current) showFloor();   // a dance is playing → swap the backdrop live
+}
+function buildFloors() {
+  el.floors.innerHTML = '';
+  FLOORS.forEach((f, i) => {
+    const li = document.createElement('li');
+    li.className = 'floor-thumb'; li.dataset.id = f.id; li.tabIndex = 0; li.setAttribute('role', 'button');
+    li.setAttribute('aria-label', `Dance floor ${i + 1}`);
+    li.innerHTML =
+      `<img src="./assets/dancefloor/${f.id}.jpg" alt="" loading="lazy" />` +
+      `<span class="floor-thumb__no">${String(i + 1).padStart(2, '0')}</span>` +
+      `<span class="floor-thumb__check material-symbols-outlined">check</span>`;
+    li.addEventListener('click', () => selectFloor(f.id));
+    li.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectFloor(f.id); } });
+    el.floors.appendChild(li);
+  });
+  markFloorSelected(settings.floor);
 }
 
 // Stop the current dance: kill the music and crossfade the body back to the idle cycle.
 function stopDance() {
   stopMusic(); current = null; markActive(null); setNowPlaying(null);
+  hideFloor();
   face?.idle?.();
 }
 
@@ -83,6 +144,7 @@ function selectDance(d) {
   if (!name) { console.warn('dance clip not loaded:', d.id); return; }
   stopMusic();
   current = d.id; markActive(d.id); setNowPlaying(d);
+  showFloor();   // fade the picked dance floor in behind her
 
   audioTimer = setTimeout(() => {
     audioTimer = null;
@@ -159,8 +221,6 @@ const updateThemeIcon = () => { el.themeBtn.querySelector('.material-symbols-out
 el.themeBtn.addEventListener('click', () => { const n = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', n); localStorage.setItem('groove.theme', n); updateThemeIcon(); });
 updateThemeIcon();
 
-el.stopBtn.addEventListener('click', stopDance);
-
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; el.installBtn.hidden = false; });
 el.installBtn.addEventListener('click', async () => { if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt = null; el.installBtn.hidden = true; } });
 
@@ -171,6 +231,7 @@ el.faceCanvas.addEventListener('pointerleave', () => face?.setGazeTarget(0, 0));
 
 // ---------- boot ----------
 buildSetList();   // show the list immediately (clicks no-op until the model is ready)
+buildFloors();    // dance-floor picker
 drawWave();
 (async () => {
   try {

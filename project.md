@@ -26,9 +26,17 @@ explicit categories (see below) and only dances are listed.
 - **IDLE** — `VRMA_01` (intro walk-in) + `VRMA_02..07` (Greeting, Peace sign, Shoot, Spin, Model pose,
   Squat). Auto-cycle via the mixer `finished` event whenever no dance is selected — exactly the ambient
   behaviour from the old project, minus the random rare-dance auto-fire (dances are manual now).
-- **DANCE** — `OtonaBlue`, `BabyYou`, `TocaToca`, `RareDance_3`, `RareDance_5`. Triggered by name from
+- **DANCE** — `OtonaBlue`, `BabyYou`, `TocaToca`, `RareDance_3`, `RareDance_5`, `RabbitHole`, `Soiree`, `Kidding`,
+  `BoomBoom`, `SakuyuiTaiso`, `Flower`, `BounceDance`, `March`. Triggered by name from
   the UI (`playDance(name)`), **looped** while the matching `music/<name>.mp3` plays. When the track
   ends (or Stop is pressed) `idle()` crossfades back to the idle cycle.
+
+### Dance floor (`app.js` + `assets/dancefloor/`)
+- Right column is split: **Set List** (60%) + **Dance Floor** picker (40%, 6 first-frame thumbnails).
+- `FLOORS` lists `floor1..6`; the picked id persists in `groove.floor`. A single `<video id="floor">`
+  sits over the still image (`face-bg.jpg`); `showFloor()`/`hideFloor()` toggle `.is-active` to crossfade
+  the selected `assets/dancefloor/<id>.mp4` in when a dance starts and back to the still image when it ends.
+  Switching floors mid-dance swaps the source live; the video pauses after the fade to save decoding.
 
 ### Music + visualizer (`app.js`)
 - Tapping a track calls `face.playDance(id, { loop: true })`, then after `MUSIC_DELAY_MS` (1.2 s, lets
@@ -72,22 +80,57 @@ stale-while-revalidate for static assets (`vrm/vrma/img/mp3/font`), cache-first 
 |---|---|---|
 | `VRMA_01..07.vrma` | pixiv VRoid Project (credit required) | idle (intro + pool) |
 | `Readme_VRMA_MotionPack_EN.txt` | pixiv | terms — credit "Animation credits to pixiv Inc.'s VRoid Project" |
-| `OtonaBlue / BabyYou / TocaToca / RareDance_3 / RareDance_5 .vrma` | user-provided pack | dance |
+| `OtonaBlue / BabyYou / TocaToca / RareDance_3 / RareDance_5 / RabbitHole / Soiree / Kidding / BoomBoom / SakuyuiTaiso / Flower / BounceDance / March .vrma` | user-provided pack | dance |
+
+### `assets/dancefloor/` — animated backdrops
+`floor1..6.mp4` (720p, audio-stripped, ~0.4–2 MB each) + `floor1..6.jpg` first-frame thumbnails for the picker.
 
 ### `tools/` — VRMA authoring helpers (kept)
-- `unity-anim-to-vrma.mjs` — converts a Unity humanoid `AnimationClip` (`.anim` YAML) into a `.vrma`.
-  Parses Mecanim muscle curves, root/IK transforms, outputs glTF binary with `VRMC_vrm_animation`.
+- `unity-anim-to-vrma.mjs` — converts a Unity humanoid `AnimationClip` (`.anim` YAML) into a `.vrma`
+  (glTF binary + `VRMC_vrm_animation`). Every bone is driven by **muscle FK** using the calibrated
+  muscle→rotation map in `muscle-calib.json`; hips come from `RootQ` (also calibrated). Falls back to
+  a crude default-range Euler approximation if the calib file is missing.
   Usage: `node tools/unity-anim-to-vrma.mjs input.anim assets/vrma/MyClip.vrma`
+- `anim-muscle.mjs` — shared Unity-muscle table + `.anim` curve parser + quaternion exp/log helpers,
+  imported by both the converter and the calibrator (so they can't drift apart).
+- `calibrate-muscles.mjs` — **fits** the muscle→bone-rotation mapping from a known-good reference
+  (its source `.anim` muscles + its correct `.vrma` rotations): per bone, `rotvec = M·(muscle vector) + b`
+  (least squares). Writes `muscle-calib.json`. Re-run only if the rig/convention changes.
+  Usage: `node tools/calibrate-muscles.mjs ref.anim ref_good.vrma [more pairs…]`
+- `muscle-calib.json` — the baked calibration (18 bones), produced from the Soirée reference
+  (which ships a correct hand-authored `.vrma` alongside its `.anim`).
 - `inspect-vrma.mjs` / `inspect-vrma2.mjs` — dump a `.vrma`'s tracks / humanoid bones.
 - `patch-vrma-specversion.mjs` — stamp a `specVersion` into a `.vrma` that's missing one.
+
+#### Why the converter was rewritten (the "collapsed ankles / no elbows" bug)
+The original converter ran an analytic two-bone IK that **overrode** the limbs whenever the clip had
+Unity Hand/Foot IK-target curves (these dances all do). That IK assumed limbs rest along **-Y** (they
+rest along ±X) and pushed every chain to full extension, so **elbows/knees never bent** (stuck ~2°), and
+it applied the raw foot IK-target quaternion as a **local** rotation → **collapsed ankles**. The fix:
+drop the IK entirely and drive all bones from Mecanim muscle curves, with the muscle→rotation mapping
+**calibrated** against the one clip that shipped a correct `.vrma` (Soirée). Validated: re-converting
+Soirée from its `.anim` now matches the authored `.vrma` within ~0.1° (spine) to ~14° (elbows), feet
+~6°, hips ~6° (was 60–120°).
 
 ---
 
 ## Adding a dance
-1. `assets/vrma/MyDance.vrma` + `music/MyDance.mp3`.
+1. `assets/vrma/MyDance.vrma` (convert a Unity `.anim` with `tools/unity-anim-to-vrma.mjs`) + `music/MyDance.mp3`.
 2. Append `'MyDance.vrma'` to `DANCE_CLIPS` in `face.js`.
 3. Append `{ id: 'MyDance', title: '…', artist: '…' }` to `DANCES` in `app.js`.
 4. Add both paths to `shell-files.json` for offline precache.
+
+## Layout & responsiveness (`styles.css`)
+- Desktop `.stage` is a 2-column grid (dancer ~62% · right column ~38%). The right column (`.rightcol`)
+  is a flex stack: **Set List 70%** + **Dance Floor picker 30%** (`flex:7` / `flex:3`); the floor grid is
+  **3 thumbnails per row**.
+- ≤900px: single column — dancer (48vh) over Set List over Dance Floor, page scrolls; floors stay 3-up.
+- ≤480px (phones): tighter chrome (subtitle hidden, smaller track rows), dancer 42vh, floors still 3-up.
+
+## Dancer foot anchor (`face.js`)
+Some converted clips carry vertical root translation. `anchorFeet()` pins the lowest foot bone to a
+floor line measured once at rest: a **hard floor** downward (no sinking, corrected same-frame) plus a
+**soft** upward pull (hops still read). Keeps every clip's apparent bottom within a few px.
 
 ## Testing
 ```
