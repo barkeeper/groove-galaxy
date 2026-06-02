@@ -5,16 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
-    script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net blob:;
+    script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net blob:;
     worker-src 'self' blob:;
     style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
     font-src 'self' https://fonts.gstatic.com data:;
     img-src 'self' data: blob:;
-    connect-src 'self' https: data: blob:;
+    media-src 'self' blob:;
+    connect-src 'self' https://cdn.jsdelivr.net data: blob:;
     manifest-src 'self';
     base-uri 'self';
   " />
-  <title>SAKURA - Chat with a local AI model</title>
+  <title>Groove Galaxy</title>
+  <meta name="description" content="A dancing 3D character that grooves to a set list of tracks — runs entirely in your browser." />
   <meta name="theme-color" content="#0a0b0d" />
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/favicon.svg" type="image/svg+xml" />
@@ -22,10 +24,7 @@
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <!-- warm the TLS connections to the lib CDN + model host so first-run downloads start sooner -->
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-  <link rel="preconnect" href="https://huggingface.co" crossorigin />
-  <link rel="dns-prefetch" href="https://cdn-lfs.huggingface.co" />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0&display=block" rel="stylesheet" />
   <link rel="stylesheet" href="./styles.css" />
@@ -33,198 +32,68 @@
 <body>
 <header class="bar">
   <div class="brand">
-    <div class="sigil" aria-hidden="true">錨</div>
+    <div class="sigil" aria-hidden="true">踊</div>
     <div class="brandtext">
-      <h1>SAKURA</h1>
+      <h1>GROOVE GALAXY</h1>
+      <p class="sub">dance floor</p>
     </div>
   </div>
 
   <div class="controls">
     <button class="iconbtn" id="installBtn" title="Install app" aria-label="Install" hidden><span class="material-symbols-outlined">install_mobile</span></button>
-
-    <div class="switch" id="modeSwitch" role="switch" aria-label="Asset source" tabindex="0" title="Where models &amp; libraries load from">
-      <span class="switch__track">
-        <span class="switch__opt" data-mode="online">WEB</span>
-        <span class="switch__opt" data-mode="offline">LOCAL</span>
-        <span class="switch__knob" aria-hidden="true"></span>
-      </span>
-    </div>
-
-    <button class="iconbtn" id="danceBtn" title="Make her dance" aria-label="Dance"><span class="material-symbols-outlined">nightlife</span></button>
+    <button class="iconbtn" id="muteBtn" title="Mute music" aria-label="Mute music"><span class="material-symbols-outlined muteglyph">volume_up</span></button>
     <button class="iconbtn" id="themeBtn" title="Toggle dark / light" aria-label="Toggle theme"><span class="material-symbols-outlined">dark_mode</span></button>
-    <button class="iconbtn" id="settingsBtn" title="Settings" aria-label="Settings"><span class="material-symbols-outlined">settings</span></button>
-
-    <div class="statuspill" title="Runtime status">
-      <span id="led" class="led"></span><span id="status">idle</span>
-    </div>
   </div>
 </header>
-
-<div id="banner" class="banner" hidden></div>
 
 <main class="stage">
   <section class="panel viewport">
     <canvas id="face"></canvas>
     <div class="hud">
       <div class="hud__top">
-        <div class="onair" id="onair"><span class="onair__dot"></span><span id="onairTxt">STANDBY</span></div>
-        <div class="hud__right">
-          <label class="field"><span class="field__lbl">voice</span><select id="voice" class="select"></select></label>
-          <button class="iconbtn iconbtn--sm" id="muteBtn" title="Mute voice" aria-label="Mute voice"><span class="material-symbols-outlined muteglyph">volume_up</span></button>
+        <div class="nowplaying" id="nowplaying" data-active="false">
+          <span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+          <span id="npText">idle</span>
         </div>
       </div>
       <div class="hud__bottom">
-        <div id="caption" class="caption" aria-live="polite"></div>
         <canvas id="wave" class="wave"></canvas>
       </div>
     </div>
     <div class="viewport__fallback" id="faceFallback" hidden></div>
   </section>
 
-  <section class="panel console">
-    <div class="console__head">
-      <div class="console__actions">
-        <button class="btn" id="preload">warm up</button>
-        <button class="btn btn--ghost" id="reset">reset chat</button>
-      </div>
+  <section class="panel setlist">
+    <div class="setlist__head">
+      <h2>Set List</h2>
+      <button class="btn btn--stop" id="stopBtn" hidden>stop</button>
     </div>
-
-    <div id="chat" class="chat"></div>
-    <div id="srAnnouncer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
-
-    <div class="composer">
-      <button class="iconbtn iconbtn--mic" id="micBtn" title="Hold / click to speak" aria-label="Voice input"><span class="material-symbols-outlined">mic</span></button>
-      <textarea id="input" placeholder="Say something — Enter to send · Shift+Enter newline · 🎙 to talk"></textarea>
-      <div class="composer__send">
-        <button class="btn btn--stop" id="stopBtn" title="Stop speaking" hidden>stop</button>
-        <button class="btn btn--send" id="send" disabled>send</button>
-      </div>
-    </div>
+    <ul class="tracks" id="tracks" aria-label="Dances"></ul>
+    <p class="setlist__hint">Tap a track to make her dance. More dances &amp; music coming soon.</p>
   </section>
 </main>
 
-<!-- settings drawer -->
-<div id="settingsPanel" class="drawer" aria-hidden="true">
-  <div class="drawer__scrim" data-close></div>
-  <aside class="drawer__panel" role="dialog" aria-label="Settings">
-    <div class="drawer__head"><h2>Settings</h2><button class="iconbtn iconbtn--sm" data-close aria-label="Close"><span class="material-symbols-outlined">close</span></button></div>
-
-    <div class="set">
-      <label class="set__row" for="voiceSel"><span>Voice</span></label>
-      <select id="voiceSel" class="select select--block"></select>
-    </div>
-    <div class="set">
-      <label class="set__row"><span>Speaking rate</span><span class="mono" id="speedVal">1.00×</span></label>
-      <input type="range" id="speed" min="0.6" max="1.4" step="0.05" value="1" />
-    </div>
-    <div class="set">
-      <label class="set__row" for="modelSel"><span>Language model</span></label>
-      <select id="modelSel" class="select select--block"></select>
-    </div>
-    <div class="set set--grid">
-      <div><label class="set__row" for="dtypeSel"><span>Precision</span></label>
-        <select id="dtypeSel" class="select select--block">
-          <option value="q4f16">q4f16 (WebGPU, ~1.4 GB)</option>
-          <option value="q8">q8 (CPU/WASM, ~1.7 GB)</option>
-          <option value="fp16">fp16 (~3.5 GB)</option>
-          <option value="fp32">fp32 (best, ~7 GB)</option>
-        </select></div>
-      <div><label class="set__row" for="deviceSel"><span>Compute</span></label>
-        <select id="deviceSel" class="select select--block">
-          <option value="webgpu">WebGPU (recommended)</option>
-          <option value="wasm">wasm (CPU)</option>
-        </select></div>
-    </div>
-
-    <div class="set">
-      <label class="set__row"><span>Loaded models</span></label>
-      <div class="meta meta--stacked">
-        <span class="tag">LLM</span><code id="llmId">—</code>
-        <span class="tag tag--alt">TTS</span><code id="ttsId">—</code>
-        <span class="tag tag--dev" id="devTag" hidden>—</span>
-      </div>
-    </div>
-
-    <div class="set set--actions">
-      <button class="btn btn--wide" id="cacheBtn">Cache everything for offline</button>
-      <p class="set__hint" id="cacheHint">Stores libraries + the current models in the browser so WEB mode keeps working with no internet.</p>
-      <button class="btn btn--ghost btn--wide" id="clearBtn">Clear conversation</button>
-    </div>
-  </aside>
-</div>
-
-<div id="overlay" class="overlay" aria-hidden="true">
-  <div class="modal">
-    <div class="modal__top">
-      <div class="ring" id="ring" style="--p:0%"></div>
-      <div class="modal__txt"><div class="modal__title" id="ovTitle">loading…</div><div class="modal__line" id="ovLine">preparing</div></div>
-      <div class="modal__pct" id="ovPct">0%</div>
-    </div>
-    <div class="modal__bar"><div id="barFill" class="modal__fill" style="--w:0%"></div></div>
-    <div class="modal__row"><span id="ovFile">—</span><span id="ovBytes">—</span></div>
-    <div class="modal__hint" id="ovHint">First run downloads model weights and caches them in the browser.</div>
-    <button class="btn btn--ghost btn--tiny" id="ovCancel" hidden>cancel download</button>
-  </div>
-</div>
-
-<!-- Bootstrap: theme + asset mode → inject matching import map (with SRI online) → load app + SW. -->
 <script>
 (async () => {
   const selfScript = document.currentScript;
-  document.documentElement.setAttribute('data-theme', localStorage.getItem('anchor.theme') || 'dark');
-  // WEB mode only — the WEB/LOCAL switch is hidden and LOCAL vendoring isn't maintained.
-  let mode = 'online';
-  localStorage.setItem('anchor.mode', 'online');
+  document.documentElement.setAttribute('data-theme', localStorage.getItem('groove.theme') || 'dark');
 
+  // WEB-only: three.js + three-vrm load from the CDN; the VRM + music are same-origin.
   const CDN = {
-    three:'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js',
-    threeCore:'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.core.js',
-    addons:'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/',
-    basis:'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/libs/basis/',
-    vrm:'https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.4.5/lib/three-vrm.module.min.js',
-    vrmAnim:'https://cdn.jsdelivr.net/npm/@pixiv/three-vrm-animation@3.4.5/lib/three-vrm-animation.module.min.js',
-    face:'./assets/avatar.vrm',
-    transformers:'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0/dist/transformers.min.js',
-    wasm:'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0-dev.20260416-b7804b056c/dist/',
-    kokoro:'https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.js',
-    phonemizer:'https://cdn.jsdelivr.net/npm/phonemizer@1.2.1/dist/phonemizer.js',
-    modelBase:null,
+    three:   'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js',
+    addons:  'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/',
+    vrm:     'https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.4.5/lib/three-vrm.module.min.js',
+    vrmAnim: 'https://cdn.jsdelivr.net/npm/@pixiv/three-vrm-animation@3.4.5/lib/three-vrm-animation.module.min.js',
+    face:    './assets/avatar.vrm',
   };
-  const LOCAL = {
-    three:'./vendor/three/build/three.module.js',
-    threeCore:'./vendor/three/build/three.core.js',
-    addons:'./vendor/three/jsm/',
-    basis:'./vendor/three/jsm/libs/basis/',
-    vrm:'./vendor/three-vrm/three-vrm.module.min.js',
-    vrmAnim:'./vendor/three-vrm/three-vrm-animation.module.min.js',
-    face:'./assets/avatar.vrm',
-    transformers:'./vendor/transformers/transformers.min.js',
-    wasm:new URL('./vendor/transformers/', document.baseURI).href,
-    kokoro:'./vendor/kokoro/kokoro.js',
-    phonemizer:'./vendor/phonemizer/phonemizer.js',
-    modelBase:'./models/',
-  };
-  let missing = false;
-  if (mode === 'offline') {
-    try { const r = await fetch(LOCAL.transformers, { method: 'HEAD', cache: 'no-store' }); if (!r.ok) missing = true; }
-    catch { missing = true; }
-    if (missing) mode = 'online';
-  }
-
-  const A = mode === 'offline' ? LOCAL : CDN;
-  window.__ANCHOR__ = { mode, requestedOffline: localStorage.getItem('anchor.mode') === 'offline', offlineMissing: missing, assets: A };
+  window.__GROOVE__ = { assets: CDN };
 
   const im = document.createElement('script');
   im.type = 'importmap';
-  const map = {
-    imports: {
-      'three': A.three, 'three/addons/': A.addons, '@pixiv/three-vrm': A.vrm, '@pixiv/three-vrm-animation': A.vrmAnim,
-      '@huggingface/transformers': A.transformers,
-      'kokoro-js': A.kokoro, 'phonemizer': A.phonemizer,
-      'path': './vendor/stub-empty.js', 'fs/promises': './vendor/stub-empty.js',
-    },
-  };
-  im.textContent = JSON.stringify(map);
+  im.textContent = JSON.stringify({ imports: {
+    'three': CDN.three, 'three/addons/': CDN.addons,
+    '@pixiv/three-vrm': CDN.vrm, '@pixiv/three-vrm-animation': CDN.vrmAnim,
+  } });
   selfScript.after(im);
 
   const app = document.createElement('script');
@@ -232,23 +101,7 @@
   im.after(app);
 
   if ('serviceWorker' in navigator) {
-    try {
-      const reg = await navigator.serviceWorker.register('./sw.js');
-      // The SW injects COOP/COEP headers so the page becomes crossOriginIsolated.
-      // BUT: (a) on first install the navigation that registered the SW has already
-      // returned without those headers, and (b) Chrome's hard-refresh (Ctrl+Shift+R)
-      // bypasses the SW for the navigation, so the page comes back uninsulated again.
-      // Either way: if we have an active SW but no COI, force a single soft reload
-      // — that one goes through the SW and gets the headers. Guarded by sessionStorage
-      // so we never loop if COI fundamentally can't be reached (e.g. unsupported browser).
-      await navigator.serviceWorker.ready;
-      if (!self.crossOriginIsolated && !sessionStorage.getItem('coi-reload')) {
-        sessionStorage.setItem('coi-reload', '1');
-        location.reload();
-        return;
-      }
-      if (self.crossOriginIsolated) sessionStorage.removeItem('coi-reload');
-    } catch (e) { console.warn('SW register failed', e); }
+    try { await navigator.serviceWorker.register('./sw.js'); } catch (e) { console.warn('SW register failed', e); }
   }
 })();
 </script>

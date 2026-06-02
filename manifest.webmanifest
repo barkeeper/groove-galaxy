@@ -1,7 +1,7 @@
 {
-  "name": "SAKURA — local AI presenter",
-  "short_name": "SAKURA",
-  "description": "In-browser LLM chat that speaks with Kokoro TTS and a living 3D face. Runs fully on-device.",
+  "name": "Groove Galaxy",
+  "short_name": "Groove Galaxy",
+  "description": "A dancing 3D character that grooves to a set list of tracks — runs entirely in your browser.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

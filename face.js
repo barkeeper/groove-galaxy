@@ -1,10 +1,12 @@
 // ============================================================
-// face.js — VRoid VRM talking head (three.js WebGL + @pixiv/three-vrm).
-// Body motion comes from pixiv's VRMA Motion Pack (loaded via three-vrm-animation):
-// boots with VRMA_01 "Show full body" (the walk-in/reveal), then cycles the other
-// clips on AFK gaps. Lip-sync, blinks, mood and gaze stay procedural via the VRM
-// expression manager and lookAt target, so speech still drives the face on top of
-// whatever body clip is playing. Same public API as before.
+// face.js — VRoid VRM dancer (three.js WebGL + @pixiv/three-vrm).
+// Two clip categories, both from pixiv's VRMA Motion Pack (via three-vrm-animation):
+//   • IDLE  — VRMA_01 "Show full body" boots the scene, then VRMA_02..07 auto-cycle
+//             whenever no dance is selected (the ambient "living" loop).
+//   • DANCE — the music-paired showstoppers, triggered by name from the UI (playDance)
+//             and looped until idle() is called.
+// Blinks + gaze stay procedural via the VRM expression manager and lookAt target,
+// layered on top of whatever body clip is playing.
 // ============================================================
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -15,22 +17,12 @@ import { createVRMAnimationClip, VRMAnimationLoaderPlugin, VRMLookAtQuaternionPr
 const lerp = (a, b, t) => a + (b - a) * t;
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
-// viseme id -> VRM mouth expression weights (aa/ih/ou/ee/oh)
-const VISEME_VRM = {
-  sil: {}, MID: { aa: 0.35 }, AA: { aa: 1.0 }, EH: { aa: 0.55, ee: 0.3 },
-  EE: { ee: 0.9, ih: 0.25 }, IH: { ih: 0.7 }, OH: { oh: 0.95 }, OO: { ou: 0.95 },
-  FV: { ih: 0.35 }, MBP: {}, L: { aa: 0.35 }, S: { ih: 0.45 }, R: { ou: 0.45 },
-};
-const MOUTH = ['aa', 'ih', 'ou', 'ee', 'oh'];
-// mood -> VRM emotion expression
-const MOOD_VRM = { neutral: {}, joy: { happy: 1 }, sad: { sad: 1 }, anger: { angry: 1 }, surprise: { surprised: 1 }, curious: { relaxed: 0.7 } };
-const EMOS = ['happy', 'sad', 'angry', 'surprised', 'relaxed'];
-
 // pixiv VRMA Motion Pack — credit: "Animation credits to pixiv Inc.'s VRoid Project"
 // (terms in assets/vrma/Readme_VRMA_MotionPack_EN.txt)
 const VRMA_BASE = './assets/vrma/';
 const VRMA_INTRO = 'VRMA_01.vrma';                   // "Show full body" — the walk-in
-const VRMA_IDLE  = [                                  // pool we cycle through when AFK
+// IDLE category — auto-cycled whenever no dance is selected (ambient motion).
+const VRMA_IDLE  = [
   'VRMA_02.vrma', // Greeting
   'VRMA_03.vrma', // Peace sign
   'VRMA_04.vrma', // Shoot
@@ -38,17 +30,15 @@ const VRMA_IDLE  = [                                  // pool we cycle through w
   'VRMA_06.vrma', // Model pose
   'VRMA_07.vrma', // Squat
 ];
-// Rare clips — "showstopper" dances. Cycled with no-repeats (each plays before any
-// repeats), gated to fire no more often than RARE_MIN_GAP_MS.
-const VRMA_RARE = [
+// DANCE category — music-paired showstoppers, listed in the UI and triggered by name.
+// Each <Name>.vrma pairs with ./music/<Name>.mp3; loops while the track plays.
+const DANCE_CLIPS = [
   'OtonaBlue.vrma',
   'BabyYou.vrma',
   'TocaToca.vrma',
   'RareDance_3.vrma',
   'RareDance_5.vrma',
 ];
-const RARE_MIN_GAP_MS = 3 * 60 * 1000;               // never sooner than 3 min apart
-const RARE_MAX_GAP_MS = 6 * 60 * 1000;               // upper bound on the random gap
 
 export async function createFace({ canvas, modelUrl }) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
@@ -139,7 +129,7 @@ export async function createFace({ canvas, modelUrl }) {
   async function tryLoad(file) { try { return await loadClip(file); } catch (e) { console.warn(`[face] skipping ${file}: ${e?.message || e}`); return null; } }
   const introClip = await loadClip(VRMA_INTRO);
   const idleClips = await Promise.all(VRMA_IDLE.map(loadClip));
-  const rareClips = (await Promise.all(VRMA_RARE.map(tryLoad))).filter(Boolean);
+  const danceClips = (await Promise.all(DANCE_CLIPS.map(tryLoad))).filter(Boolean);
 
   const mixer = new THREE.AnimationMixer(vrm.scene);
   let currentAction = null;
@@ -159,41 +149,23 @@ export async function createFace({ canvas, modelUrl }) {
     return action;
   }
 
-  // Shuffled queue of rare clips — each plays once before any repeats. Reshuffled
-  // (without putting the last-played one first) once the queue empties.
-  function fyShuffle(a) { const r = a.slice(); for (let i = r.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [r[i], r[j]] = [r[j], r[i]]; } return r; }
-  let rareQueue = fyShuffle(rareClips);
-  let lastRare = null;
-  function nextRareClip() {
-    if (!rareQueue.length) {
-      rareQueue = fyShuffle(rareClips);
-      // make sure the first one isn't the same as the last we played
-      if (rareClips.length > 1 && rareQueue[0] === lastRare) rareQueue.push(rareQueue.shift());
-    }
-    const clip = rareQueue.shift(); lastRare = clip; return clip;
-  }
+  // Look up a dance clip by name — the UI triggers these on demand.
+  const danceByName = new Map(danceClips.map((c) => [c.name, c]));
 
-  // queue next clip when the current one finishes
+  // Auto-cycle IDLE clips when one finishes (the ambient loop). DANCE clips loop
+  // (LoopRepeat) so they never fire 'finished' here — they end only when the UI calls idle().
   let nextQueuedAt = 0;
   let queuedClip = null;
-  let nextRareAt = performance.now() + RARE_MIN_GAP_MS + Math.random() * (RARE_MAX_GAP_MS - RARE_MIN_GAP_MS);
   mixer.addEventListener('finished', (e) => {
     // Only react when the CURRENTLY-active clip ends. A manually-triggered dance crossfades
-    // out the previous idle, whose LoopOnce action may then fire 'finished' mid-fade — without
-    // this guard it would queue an idle that overrides the dance ~1s later.
+    // out the previous idle, whose LoopOnce action may then fire 'finished' mid-fade — this
+    // guard stops that from queuing an idle that would override the dance.
     if (e.action !== currentAction) return;
-    const now = performance.now();
     let pick;
-    if (rareClips.length && now >= nextRareAt) {
-      pick = nextRareClip();
-      nextRareAt = now + RARE_MIN_GAP_MS + Math.random() * (RARE_MAX_GAP_MS - RARE_MIN_GAP_MS);
-    } else {
-      // pick a random idle clip, avoiding repeating the one we just played
-      do { pick = idleClips[(Math.random() * idleClips.length) | 0]; }
-      while (idleClips.length > 1 && pick === currentAction?.getClip());
-    }
+    do { pick = idleClips[(Math.random() * idleClips.length) | 0]; }
+    while (idleClips.length > 1 && pick === currentAction?.getClip());
     queuedClip = pick;
-    nextQueuedAt = now + 1200 + Math.random() * 2000; // small breather between clips
+    nextQueuedAt = performance.now() + 1200 + Math.random() * 2000; // small breather between idles
   });
 
   // boot with the intro
@@ -205,14 +177,11 @@ export async function createFace({ canvas, modelUrl }) {
   try {
     window.__face = {
       status: () => ({
-        rareLoaded: rareClips.length > 0,
-        secondsUntilRare: Math.max(0, Math.round((nextRareAt - performance.now()) / 1000)),
+        dances: danceClips.map((c) => c.name),
         currentClip: currentAction?.getClip()?.name || null,
         idleCount: idleClips.length,
       }),
-      playRare: () => { if (!rareClips.length) return 'no rare clip loaded'; queuedClip = null; const c = nextRareClip(); playClip(c, { fade: 0.4 }); return `playing: ${c.name || '(unnamed)'}`; },
-      // debug: current mouth expression weights, so a test can verify lip-sync is driving them.
-      sampleMouth: () => { const o = {}; for (const m of MOUTH) o[m] = +((expr?.getValue?.(m)) ?? 0).toFixed(3); return o; },
+      playDance: (name) => { const c = danceByName.get(name); if (!c) return `no clip: ${name}`; queuedClip = null; playClip(c, { fade: 0.4, loop: true }); return `playing: ${c.name}`; },
       // debug: sample a few humanoid bone rotations so a test can detect whether a clip
       // is actually driving the rig (motion) vs. loaded-but-inert (no retargeted tracks).
       sampleBones: () => {
@@ -226,11 +195,7 @@ export async function createFace({ canvas, modelUrl }) {
     };
   } catch {}
 
-  // ---- expressions state (mouth/blink/gaze/mood, applied on top of VRMA) ----
-  let level = 0, openS = 0;
-  let visCur = {}, visTarget = {};
-  let moodCur = {}, moodTarget = {};
-  let speaking = false;
+  // ---- expressions state (blink + gaze, layered on top of the VRMA body clip) ----
   const gaze = { x: 0, y: 0, tx: 0, ty: 0, sx: 0, sy: 0 };
   let nextSaccade = performance.now() + 900;
   let blink = 0, nextBlink = performance.now() + 1800 + Math.random() * 2400;
@@ -239,7 +204,6 @@ export async function createFace({ canvas, modelUrl }) {
   let running = true;
 
   const setExpr = (name, v) => { try { expr?.setValue(name, v); } catch {} };
-  const blendObj = (cur, tgt, k) => { const keys = new Set([...Object.keys(cur), ...Object.keys(tgt)]); for (const key of keys) cur[key] = lerp(cur[key] || 0, tgt[key] || 0, k); };
 
   function frame() {
     if (!running) return;
@@ -255,20 +219,6 @@ export async function createFace({ canvas, modelUrl }) {
       queuedClip = null;
     }
 
-    // ---- mouth visemes ----
-    openS = lerp(openS, level, level > openS ? 0.5 : 0.3);
-    blendObj(visCur, visTarget, 0.4);
-    const acc = {}; for (const m of MOUTH) acc[m] = 0;
-    // Mouth openness is gated purely by live audio amplitude (no constant base): when the
-    // voice stops, openS → 0 and the mouth fully closes, even if a viseme shape lingers.
-    const gate = Math.min(1, openS * 1.4);
-    for (const m in visCur) if (acc[m] !== undefined) acc[m] += visCur[m] * gate;
-    for (const m of MOUTH) setExpr(m, clamp01(acc[m]));
-
-    // ---- mood ----
-    blendObj(moodCur, moodTarget, 0.05);
-    for (const e of EMOS) setExpr(e, clamp01(moodCur[e] || 0));
-
     // ---- blink (state machine: idle → close→open → schedule next) ----
     if (blink === 0 && now > nextBlink) {
       blink = 0.001;
@@ -278,7 +228,7 @@ export async function createFace({ canvas, modelUrl }) {
       blink += dt * 7;
       if (blink >= 1) blink = 0;
     }
-    setExpr('blink', clamp01(Math.sin(blink * Math.PI) * (1 - (moodCur.happy || 0) * 0.6)));
+    setExpr('blink', clamp01(Math.sin(blink * Math.PI)));
 
     // ---- gaze (saccades + cursor target → lookAt) ----
     if (now > nextSaccade) {
@@ -303,18 +253,21 @@ export async function createFace({ canvas, modelUrl }) {
   function resize() { const s = size(); if (s.w === w && s.h === h) return; w = s.w; h = s.h; camera.aspect = w / h; renderer.setSize(w, h, false); reframe(); }
 
   return {
-    setMouth(v) { level = clamp01(v); },
-    setViseme(id) { visTarget = VISEME_VRM[id] || {}; },
-    setMood(mood, intensity = 0.6) { const baseM = MOOD_VRM[mood] || {}; const scaled = {}; for (const e in baseM) scaled[e] = baseM[e] * (0.4 + intensity * 0.7); moodTarget = scaled; },
     setGazeTarget(x, y) { gaze.tx = Math.max(-1, Math.min(1, x)); gaze.ty = Math.max(-1, Math.min(1, y)); },
-    // when speech stops, force the mouth fully shut: zero the amplitude AND clear the viseme
-    // target + current shapes (the viseme term has a 0.25 base, so a lingering visCur would
-    // otherwise hold the mouth ~25% open).
-    setSpeaking(on) { speaking = !!on; if (!on) { level = 0; openS = 0; visTarget = {}; visCur = {}; } },
-    // trigger a showstopper dance on demand (UI button); returns the clip name (e.g. "BabyYou")
-    // so the caller can play the matching music, or null if no rare clips are loaded.
-    playRare() { if (!rareClips.length) return null; queuedClip = null; const c = nextRareClip(); playClip(c, { fade: 0.4 }); return c.name || null; },
-    hasRare() { return rareClips.length > 0; },
+    // Names of the dance clips that actually loaded (so the UI can flag any that are missing).
+    dances() { return danceClips.map((c) => c.name); },
+    // Trigger a named dance on demand; loops until idle() is called. Returns the clip name,
+    // or null if that dance isn't loaded.
+    playDance(name, { loop = true } = {}) {
+      const clip = danceByName.get(name);
+      if (!clip) return null;
+      queuedClip = null;
+      playClip(clip, { fade: 0.4, loop });
+      return clip.name;
+    },
+    // Crossfade back to an idle clip (called when a dance / its music stops); the 'finished'
+    // handler then resumes the ambient idle cycle.
+    idle() { queuedClip = null; const pick = idleClips[(Math.random() * idleClips.length) | 0]; if (pick) playClip(pick, { fade: 0.6 }); },
     resize,
     dispose() { running = false; try { mixer.stopAllAction(); } catch {} try { VRMUtils.deepDispose?.(vrm.scene); } catch {} renderer.dispose(); },
   };

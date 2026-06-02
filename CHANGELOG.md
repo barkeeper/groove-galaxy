@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-06-02 — Groove Galaxy (dance-only pivot)
+
+- "I want to change the project and remove all the llm and voice features, I just want to see the dancing/animating girl, and instead of a dance button on top I want the dances to be listed where the chat is now, I will add more dances and music to this later" — removed every LLM/voice module (`infer.js`, `llm-worker.js`, `tts-worker.js`, `speech.js`, `stt.js`, `stt-worker.js`, `emotion.js`, `persist.js`). Rewrote `app.js` into a lean dance controller and replaced the chat console with a **Set List** of dances on the right; deleted the header Dance button. The character (VRM) is the whole show now.
+
+- "when no dance is selected on the right side menu, the character can use the animations for idle that are in the project, split up idle and dance animations into different categories and list only the dance animations on the right side menu, the idle animations just play like they did in the old project" — made the IDLE vs DANCE split explicit in `face.js`: `VRMA_01..07` auto-cycle as before whenever idle; only the 5 music-paired dances are listed and triggered by name (`playDance`), looped while their track plays. Removed the random rare-dance auto-fire.
+
+- "also clean up all files no longer needed, keep the project.md and update this where needed" — deleted `models/` (~270 MB of weights), `vendor/`, the legacy single-file `index2.html`, `tools/fetch-offline.ps1`, and all LLM/TTS/STT/old-UI Playwright probes (kept the VRMA authoring tools). Trimmed `sw.js` (no COOP/COEP, no precache messaging), updated `shell-files.json`, `manifest.webmanifest`, `package.json`, `README.md`, and `project.md`.
+
+- "rename the html header, the name in the top bar and the project from Sakura to Groove Galaxy" — renamed throughout (title, brand, manifest, package, `localStorage` `groove.*` keys).
+
+- "keep the Kanji character logo, but change it into dance : 踊" — swapped the brand sigil from 錨/✦ to 踊.
+
 ## 2026-05-31
 
 - Combine 3 projects into 1: the Transformers.js browser chat ("test llm.html"), Kokoro TTS speech (tts.rocks engine), and the three.js WebGPU morph-targets face — so the LLM speaks its replies with an animated face that follows the spoken text.

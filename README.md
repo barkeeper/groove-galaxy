@@ -1,77 +1,71 @@
-# ANCHOR — a local AI presenter
+# Groove Galaxy 踊
 
-Three projects fused into one single-page app that runs **100% in the browser**, on-device:
+A single-page app where a **3D VRM character dances** to a set list of tracks — runs **100% in the browser**, no backend.
 
-1. **Chat** — an LLM (`SmolLM2`) via [Transformers.js](https://github.com/huggingface/transformers.js).
-2. **Voice** — replies are spoken with [Kokoro TTS](https://github.com/hexgrad/kokoro) (the engine behind [tts.rocks](https://github.com/steveseguin/tts.rocks)).
-3. **Face** — a [three.js WebGPU Face Cap](https://threejs.org/examples/?q=webgpu#webgpu_morphtargets_face) head that lip-syncs and emotes.
+- **Dancer** — a [VRoid VRM](https://vroid.com/en) avatar rendered with [three.js](https://threejs.org) + [@pixiv/three-vrm](https://github.com/pixiv/three-vrm). She idles on her own and dances on demand.
+- **Motion** — [VRMA](https://github.com/pixiv/three-vrm/tree/dev/packages/three-vrm-animation) mocap clips: an intro walk-in, an ambient idle loop, and the music-paired dances.
+- **Set List** — pick a track on the right; she loops that dance while the song plays, with a live equalizer.
 
-## Features
+## Animation categories
 
-| | |
-|---|---|
-| **Streaming** | LLM tokens stream straight into Kokoro, so the face starts talking ~1 sentence in. |
-| **Viseme lip-sync** | Phonemes → mouth shapes (ah/ee/oo/closed…) blended with live audio amplitude. |
-| **Emotion** | A zero-cost heuristic reads each reply and sets the face's mood (joy/curious/sad/…). |
-| **Gaze & life** | Eyes track the cursor, saccade, blink; the head turns toward you while speaking. |
-| **Voice input** | Hold/click 🎙 to talk — Whisper (`whisper-tiny.en`) transcribes locally. |
-| **Captions** | Karaoke-style captions sync to the spoken words. |
-| **Memory** | The conversation persists across reloads. |
-| **Settings** | Voice, speaking rate, model (135M/360M), precision, and compute device. |
-| **Off-main-thread** | The LLM + Kokoro run in a Web Worker, so the main thread stays free and the face renders in sync with the audio. |
-| **WebGPU** | The 3D face uses WebGPU; the LLM defaults to CPU (so the GPU is free for the face) and can opt into WebGPU in settings. |
-| **PWA / offline** | Installable; a service worker caches everything so WEB mode keeps working with no internet. |
-| **WEB ⇄ LOCAL** | Switch every asset source between CDN+HF and the local project folder. |
-| **Dark / light** | Instant theme toggle. |
+| Category | Clips | Behaviour |
+|---|---|---|
+| **Idle** | `VRMA_01` (intro) + `VRMA_02..07` | Auto-cycle whenever no dance is selected — the ambient "living" loop. |
+| **Dance** | `OtonaBlue`, `BabyYou`, `TocaToca`, `RareDance_3`, `RareDance_5` | Listed in the Set List. Triggered by tap, looped until stopped, paired with `music/<name>.mp3`. |
 
 ## Run
 
-Serve over HTTP (ES modules, WebGPU and the service worker need a real origin):
+Serve over HTTP (ES modules + service worker need a real origin):
 
 ```powershell
 python -m http.server 5173        # or: npx serve .
 ```
 
-Open the page, type or hit 🎙, press **Enter**. First run downloads the models and caches them.
+Open the page and tap a track. First run pulls three.js from the CDN and caches it (works offline after).
 
-> The face needs **WebGPU** (Chrome/Edge), falling back to WebGL2. Chat + voice work regardless.
+> The dancer needs **WebGL2** (any recent Chrome / Edge / Firefox / Safari).
 
-## Going offline — two ways
+## Add a dance
 
-**A. Cache button (WEB mode).** Settings → **Cache everything for offline**. A service worker stores the libraries + current models in the browser; afterwards WEB mode runs with no network.
+1. Drop `MyDance.vrma` into `assets/vrma/` and `MyDance.mp3` into `music/`.
+2. Add the filename to `DANCE_CLIPS` in `face.js`.
+3. Add an entry to `DANCES` in `app.js` (`id` must match the filenames):
+   ```js
+   { id: 'MyDance', title: 'My Dance', artist: 'Someone' },
+   ```
+4. Add both files to `shell-files.json` so they precache for offline.
 
-**B. LOCAL mode (ship the folder).** Vendor everything into the project, then flip the switch to **LOCAL**:
+Convert a Unity humanoid `.anim` to `.vrma` with the bundled tool:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/fetch-offline.ps1   # ~296 MB (q8). add -With360 for the 360M model
+node tools/unity-anim-to-vrma.mjs source.anim assets/vrma/MyDance.vrma
 ```
-
-If LOCAL is selected without the assets present, the app stays on WEB and tells you what to run.
 
 ## Layout
 
 ```
-index.html        bootstrap: CSP + SRI import map + SW/PWA + theme → loads app.js
-app.js            orchestrator: chat → stream → speak → emote, settings, offline, controls
-infer-worker.js   Web Worker running BOTH the LLM and Kokoro (shared transformers instance)
-infer.js          main-thread client for the worker
-face.js           three.js WebGPU head (visemes + mood + gaze)
-speech.js         audio player: gapless playback, viseme timeline, captions, metering
-stt.js            Whisper push-to-talk
-emotion.js   heuristic mood    persist.js  conversation memory
-styles.css   analog-broadcast design system (2 themes)
-sw.js        offline service worker      manifest.webmanifest  icons/
-vendor/stub-empty.js   node built-in no-ops for kokoro-js
-tools/       fetch-offline.ps1 + Playwright tests (smoke / e2e-plus / stt / offline)
+index.html        bootstrap: CSP + import map (three / three-vrm) + SW/PWA + theme → loads app.js
+app.js            Set List + music player + spectrum visualizer (no LLM, no voice)
+face.js           three.js VRM dancer — idle cycle, named dances (playDance), blink + gaze
+styles.css        analog dance-floor design system (2 themes)
+sw.js             offline service worker        manifest.webmanifest   icons/
+assets/avatar.vrm + assets/vrma/*.vrma + assets/face-bg.jpg
+music/*.mp3       one track per dance
+tools/            VRMA authoring helpers (inspect / patch / unity converter)
 ```
 
-`vendor/<libs>`, `models/`, `node_modules/` are git-ignored (regenerated by the script / npm).
+`node_modules/` and `package-lock.json` are git-ignored.
 
-## Tests
+## DevTools probes
 
-```powershell
-node tools/smoke.mjs http://127.0.0.1:5173/        # wiring, theme, face
-node tools/e2e-plus.mjs http://127.0.0.1:5173      # streaming, captions, ON AIR, stop, settings, SW
-node tools/stt-test.mjs http://127.0.0.1:5173      # Whisper transcription
-node tools/offline-test.mjs http://127.0.0.1:5173  # full loop with all external network blocked
+```js
+__face.status()            // { dances, currentClip, idleCount }
+__face.playDance('BabyYou')// trigger a dance immediately
+__face.sampleBones()       // verify a clip is actually driving the rig
 ```
+
+## Credits
+
+- **VRoid model** — Zelená Terra / "Little Black Dress #6" by BEAMER3K.
+- **VRMA Motion Pack (intro + idle)** — pixiv VRoid Project — credit required: *"Animation credits to pixiv Inc.'s VRoid Project"* (see `assets/vrma/Readme_VRMA_MotionPack_EN.txt`).
+- **Dance clips** — user-supplied VRMA pack.

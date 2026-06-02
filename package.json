@@ -1,7 +1,7 @@
 {
-  "name": "llmtest",
-  "version": "1.0.0",
-  "description": "Three projects fused into one single-page app that runs **100% in the browser**:",
+  "name": "groove-galaxy",
+  "version": "2.0.0",
+  "description": "A dancing 3D VRM character that grooves to a set list of tracks — runs 100% in the browser.",
   "main": "app.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
