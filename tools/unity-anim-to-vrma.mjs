@@ -143,6 +143,14 @@ function eulerXYZToQuat(rx, ry, rz) {
 }
 
 function quatNormalize(q) { const l = Math.hypot(q[0], q[1], q[2], q[3]) || 1; return [q[0]/l, q[1]/l, q[2]/l, q[3]/l]; }
+function quatMul(a, b) { return [
+  a[3]*b[0] + a[0]*b[3] + a[1]*b[2] - a[2]*b[1],
+  a[3]*b[1] - a[0]*b[2] + a[1]*b[3] + a[2]*b[0],
+  a[3]*b[2] + a[0]*b[1] - a[1]*b[0] + a[2]*b[3],
+  a[3]*b[3] - a[0]*b[0] - a[1]*b[1] - a[2]*b[2],
+]; }
+function quatConj(q) { return [-q[0], -q[1], -q[2], q[3]]; }   // inverse for a unit quaternion
+function twistY(q) { const n = Math.hypot(q[1], q[3]) || 1; return [0, q[1]/n, 0, q[3]/n]; } // swing-twist: the rotation about world Y (yaw)
 
 // ---------- main ----------
 const [inPath, outPath] = process.argv.slice(2);
@@ -241,9 +249,20 @@ for (let f = 0; f < frames; f++) {
     }
   }
 
-  // (Limbs are driven entirely by muscle FK above. The old analytic foot/hand IK override was
-  // removed: it assumed limbs rest along -Y and forced full extension, so elbows/knees never bent
-  // and the raw foot IK-target quaternion became a bad local rotation — collapsed ankles.)
+  // ---- foot leveling ----
+  // These mocap clips are IK-foot-pinned, so their FK foot *muscles* are unreliable: applied as FK
+  // they point the toes regardless of pose (constant tiptoe). Keeping a sole flat needs the leg
+  // angle, which a muscle-only foot fit can't capture and doesn't generalize from the reference.
+  // So we override each foot to sit flat on the floor, facing the leg's yaw:
+  //   footWorld = yaw(legWorld)  ⇒  footLocal = inv(legWorld) · yaw(legWorld)
+  // (Other limbs still come from the validated muscle calibration above; the old analytic IK that
+  // assumed limbs rest along -Y and collapsed the ankles is gone.)
+  const fq = (bone) => { const a = boneQuats.get(bone); return a ? [a[f*4], a[f*4+1], a[f*4+2], a[f*4+3]] : [0, 0, 0, 1]; };
+  const hipsQ = fq('hips');
+  for (const [up, lo, foot] of [['leftUpperLeg', 'leftLowerLeg', 'leftFoot'], ['rightUpperLeg', 'rightLowerLeg', 'rightFoot']]) {
+    const legWorld = quatMul(hipsQ, quatMul(fq(up), fq(lo)));
+    setBoneQuat(foot, quatNormalize(quatMul(quatConj(legWorld), twistY(legWorld))));
+  }
 }
 
 // Ensure hips has a quaternion track (identity if no muscles drove it)

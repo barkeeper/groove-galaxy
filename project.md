@@ -90,6 +90,11 @@ stale-while-revalidate for static assets (`vrm/vrma/img/mp3/font`), cache-first 
   (glTF binary + `VRMC_vrm_animation`). Every bone is driven by **muscle FK** using the calibrated
   muscle→rotation map in `muscle-calib.json`; hips come from `RootQ` (also calibrated). Falls back to
   a crude default-range Euler approximation if the calib file is missing.
+  **Feet are special:** these mocap clips are IK-foot-pinned, so their FK foot *muscles* are unreliable
+  (applied as FK they point the toes regardless of pose → constant tiptoe). So the converter ignores the
+  foot muscles and **levels each foot flat to the floor**, facing the leg's yaw:
+  `footWorld = yaw(legWorld)` ⇒ `footLocal = inv(legWorld)·yaw(legWorld)`. This needs no per-clip foot
+  data and keeps soles grounded across every dance.
   Usage: `node tools/unity-anim-to-vrma.mjs input.anim assets/vrma/MyClip.vrma`
 - `anim-muscle.mjs` — shared Unity-muscle table + `.anim` curve parser + quaternion exp/log helpers,
   imported by both the converter and the calibrator (so they can't drift apart).
