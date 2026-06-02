@@ -17,14 +17,7 @@ const DANCES = [
   { id: 'TocaToca',    title: 'Toca Toca',    artist: 'Fly Project' },
   { id: 'RareDance_3', title: 'Sorry for Being Cute', artist: 'HoneyWorks' },
   { id: 'RareDance_5', title: 'Rhapsody of Blue Sky', artist: 'fhána' },
-  { id: 'RabbitHole',  title: 'Rabbit Hole',          artist: 'DECO*27' },
   { id: 'Soiree',       title: 'Soirée',                            artist: 'Hoshimachi Suisei' },
-  { id: 'Kidding',      title: 'Kidding',                           artist: 'ISEGYE IDOL' },
-  { id: 'BoomBoom',     title: 'Eve, Psyche & the Bluebeard’s Wife', artist: 'LE SSERAFIM' },
-  { id: 'SakuyuiTaiso', title: 'Sakuyui Exercise',                  artist: 'Sakuyui' },
-  { id: 'Flower',       title: 'FLOWER',                            artist: 'JISOO' },
-  { id: 'BounceDance',  title: 'TiK ToK',                           artist: 'Kesha' },
-  { id: 'March',        title: 'March!!',                           artist: 'MaiR' },
 ];
 
 // Dance floors — animated video backdrops in ./assets/dancefloor/<id>.mp4 (+ <id>.jpg first-frame thumb).

@@ -13,7 +13,7 @@ A single-page app where a **3D VRM character dances** to a set list of tracks �
 | Category | Clips | Behaviour |
 |---|---|---|
 | **Idle** | `VRMA_01` (intro) + `VRMA_02..07` | Auto-cycle whenever no dance is selected — the ambient "living" loop. |
-| **Dance** | `OtonaBlue`, `BabyYou`, `TocaToca`, `RareDance_3`, `RareDance_5`, `RabbitHole`, `Soiree`, `Kidding`, `BoomBoom`, `SakuyuiTaiso`, `Flower`, `BounceDance`, `March` | Listed in the Set List. Triggered by tap, looped until stopped, paired with `music/<name>.mp3`. |
+| **Dance** | `OtonaBlue`, `BabyYou`, `TocaToca`, `RareDance_3`, `RareDance_5`, `Soiree` | Listed in the Set List. Triggered by tap, looped until stopped, paired with `music/<name>.mp3`. |
 | **Dance Floor** | `assets/dancefloor/floor1..6.mp4` (+ `floorN.jpg` first-frame thumbs) | Animated backdrops; the picked one fades in behind the dancer while a dance plays. |
 | **Models** | `assets/avatar.vrm` (Sakura) + `assets/models/<id>.vrm` (+ `<id>.jpg` preview) | Swappable VRM dancers; each gets its own idle-clip subset. Only `.vrm` files work — Unity-package/FBX models need a Unity→VRM export first. |
 

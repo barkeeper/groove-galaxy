@@ -38,14 +38,7 @@ const DANCE_CLIPS = [
   'TocaToca.vrma',
   'RareDance_3.vrma',
   'RareDance_5.vrma',
-  'RabbitHole.vrma',
   'Soiree.vrma',
-  'Kidding.vrma',
-  'BoomBoom.vrma',
-  'SakuyuiTaiso.vrma',
-  'Flower.vrma',
-  'BounceDance.vrma',
-  'March.vrma',
 ];
 
 export async function createFace({ canvas, modelUrl, idleFiles }) {

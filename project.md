@@ -93,7 +93,7 @@ stale-while-revalidate for static assets (`vrm/vrma/img/mp3/font`), cache-first 
 |---|---|---|
 | `VRMA_01..07.vrma` | pixiv VRoid Project (credit required) | idle (intro + pool) |
 | `Readme_VRMA_MotionPack_EN.txt` | pixiv | terms — credit "Animation credits to pixiv Inc.'s VRoid Project" |
-| `OtonaBlue / BabyYou / TocaToca / RareDance_3 / RareDance_5 / RabbitHole / Soiree / Kidding / BoomBoom / SakuyuiTaiso / Flower / BounceDance / March .vrma` | user-provided pack | dance |
+| `OtonaBlue / BabyYou / TocaToca / RareDance_3 / RareDance_5 / Soiree .vrma` | user-provided pack | dance |
 
 ### `assets/dancefloor/` — animated backdrops
 `floor1..6.mp4` (720p, audio-stripped, ~0.4–2 MB each) + `floor1..6.jpg` first-frame thumbnails for the picker.
