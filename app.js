@@ -20,17 +20,21 @@ const DANCES = [
 ];
 
 const MUSIC_DELAY_MS = 1200;  // let the dance wind up before the track drops in
-const MUSIC_VOLUME = 0.6;
+const DEFAULT_VOLUME = 0.5;    // 50% on first run
 
 // ---------- DOM ----------
 const $ = (id) => document.getElementById(id);
 const el = {
   faceCanvas: $('face'), faceFallback: $('faceFallback'), wave: $('wave'),
-  tracks: $('tracks'), stopBtn: $('stopBtn'), muteBtn: $('muteBtn'), themeBtn: $('themeBtn'), installBtn: $('installBtn'),
+  tracks: $('tracks'), stopBtn: $('stopBtn'), muteBtn: $('muteBtn'), volume: $('volume'), themeBtn: $('themeBtn'), installBtn: $('installBtn'),
   np: $('nowplaying'), npText: $('npText'),
 };
 
-const settings = { muted: localStorage.getItem('groove.muted') === '1' };
+const storedVol = localStorage.getItem('groove.volume');
+const settings = {
+  muted: localStorage.getItem('groove.muted') === '1',
+  volume: storedVol == null ? DEFAULT_VOLUME : Math.max(0, Math.min(1, +storedVol || 0)),
+};
 
 let face = null;
 let audio = null, audioTimer = null, current = null, deferredPrompt = null;
@@ -83,7 +87,7 @@ function selectDance(d) {
   audioTimer = setTimeout(() => {
     audioTimer = null;
     audio = new Audio(`./music/${encodeURIComponent(d.id)}.mp3`);
-    audio.volume = MUSIC_VOLUME;
+    audio.volume = settings.volume;
     audio.muted = settings.muted;
     if (analyser) { try { audioCtx.createMediaElementSource(audio).connect(analyser); } catch (e) { console.warn('analyser tap failed:', e?.message || e); } }
     audio.addEventListener('ended', stopDance);
@@ -134,12 +138,22 @@ function drawWave() {
 }
 
 // ---------- mute / theme / install ----------
-function applyMute() {
-  if (audio) audio.muted = settings.muted;
-  el.muteBtn.querySelector('.muteglyph').textContent = settings.muted ? 'volume_off' : 'volume_up';
+// Mute and volume are independent: the slider sets the level, the button silences it.
+// Glyph reflects both (off when muted or at zero, down below 50%, up otherwise).
+function muteGlyph() { return (settings.muted || settings.volume === 0) ? 'volume_off' : settings.volume < 0.5 ? 'volume_down' : 'volume_up'; }
+function applyAudio() {
+  if (audio) { audio.muted = settings.muted; audio.volume = settings.volume; }
+  el.muteBtn.querySelector('.muteglyph').textContent = muteGlyph();
 }
-el.muteBtn.addEventListener('click', () => { settings.muted = !settings.muted; localStorage.setItem('groove.muted', settings.muted ? '1' : '0'); applyMute(); });
-applyMute();
+el.volume.value = Math.round(settings.volume * 100);
+el.volume.addEventListener('input', () => {
+  settings.volume = +el.volume.value / 100;
+  localStorage.setItem('groove.volume', String(settings.volume));
+  if (settings.muted && settings.volume > 0) { settings.muted = false; localStorage.setItem('groove.muted', '0'); }  // dragging up un-mutes
+  applyAudio();
+});
+el.muteBtn.addEventListener('click', () => { settings.muted = !settings.muted; localStorage.setItem('groove.muted', settings.muted ? '1' : '0'); applyAudio(); });
+applyAudio();
 
 const updateThemeIcon = () => { el.themeBtn.querySelector('.material-symbols-outlined').textContent = document.documentElement.getAttribute('data-theme') === 'light' ? 'light_mode' : 'dark_mode'; };
 el.themeBtn.addEventListener('click', () => { const n = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', n); localStorage.setItem('groove.theme', n); updateThemeIcon(); });

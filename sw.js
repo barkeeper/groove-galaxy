@@ -50,7 +50,7 @@ self.addEventListener('fetch', (e) => {
     e.respondWith((async () => {
       const cache = await caches.open(CACHE);
       try {
-        const res = await fetch(req);
+        const res = await fetch(req, { cache: 'no-store' });   // always revalidate code so edits show
         if (res && res.ok) cache.put(req, res.clone()).catch(() => {});
         return res;
       } catch {

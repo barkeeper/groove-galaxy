@@ -12,6 +12,12 @@
 
 - "keep the Kanji character logo, but change it into dance : 踊" — swapped the brand sigil from 錨/✦ to 踊.
 
+- "can you stop the server on port 5173 and start a new one with this project?" — stopped the old (different-folder) server and served Groove Galaxy on :5173.
+
+- "The model is not loading, and the list of tracks/dances to select from is empty, also the text … not lined out correctly (needs padding left)" — root cause: stale cache from the old SAKURA app. `python -m http.server` sends no cache headers, so the browser kept serving the old `app.js`/`styles.css` (the old `app.js` throws on the new DOM → empty list + no model; old CSS → no padding). Fixes: added a no-store dev server (`tools/serve.mjs`), made the service worker fetch code with `cache: 'no-store'`, and aligned the Set List header/hint padding to the track numbers (22px). The new build is correct in a fresh browser (verified with Playwright).
+
+- "Next to the sound mute in the top bar implement a volume slider, default volume 50%, keep the mute button working" — added a volume slider beside the mute button (default 50%, persisted in `groove.volume`). The glyph reflects level (off / down / up), dragging up un-mutes, and the mute button still toggles independently.
+
 ## 2026-05-31
 
 - Combine 3 projects into 1: the Transformers.js browser chat ("test llm.html"), Kokoro TTS speech (tts.rocks engine), and the three.js WebGPU morph-targets face — so the LLM speaks its replies with an animated face that follows the spoken text.

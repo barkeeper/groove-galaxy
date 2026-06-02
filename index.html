@@ -41,7 +41,10 @@
 
   <div class="controls">
     <button class="iconbtn" id="installBtn" title="Install app" aria-label="Install" hidden><span class="material-symbols-outlined">install_mobile</span></button>
-    <button class="iconbtn" id="muteBtn" title="Mute music" aria-label="Mute music"><span class="material-symbols-outlined muteglyph">volume_up</span></button>
+    <div class="volume">
+      <button class="iconbtn" id="muteBtn" title="Mute music" aria-label="Mute music"><span class="material-symbols-outlined muteglyph">volume_up</span></button>
+      <input type="range" id="volume" class="vol" min="0" max="100" step="1" value="50" aria-label="Music volume" title="Volume" />
+    </div>
     <button class="iconbtn" id="themeBtn" title="Toggle dark / light" aria-label="Toggle theme"><span class="material-symbols-outlined">dark_mode</span></button>
   </div>
 </header>

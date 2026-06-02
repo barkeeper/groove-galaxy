@@ -15,10 +15,12 @@ A single-page app where a **3D VRM character dances** to a set list of tracks â€
 
 ## Run
 
-Serve over HTTP (ES modules + service worker need a real origin):
+Serve over HTTP (ES modules + service worker need a real origin). Use the bundled
+**no-store** dev server so the browser never serves stale code/assets (plain
+`python -m http.server` caches forever, which breaks service-worker updates):
 
 ```powershell
-python -m http.server 5173        # or: npx serve .
+node tools/serve.mjs            # â†’ http://127.0.0.1:5173/  (pass a port to change it)
 ```
 
 Open the page and tap a track. First run pulls three.js from the CDN and caches it (works offline after).
