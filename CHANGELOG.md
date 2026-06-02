@@ -2,6 +2,8 @@
 
 ## 2026-06-02 — Groove Galaxy (dance-only pivot)
 
+- "Make the dance floor section a little bigger so the scrollbar disappears on a normal screen; make all scrollbars follow dark/light theming; and make the dance-floor images scale on smaller screens (they overlap now)." — (1) bumped the picker 30%→36% (`.floorpick` flex 3→4) so the 2×3 grid fits without scrolling at 1440/1280/1100/1024; (2) added global theme-aware scrollbars (`scrollbar-color: var(--line2) transparent` + webkit thumb `--line2`/hover `--muted`, transparent track) and removed the per-element scrollbar rules; (3) fixed the overlap by moving `aspect-ratio:16/9` from the grid item to the `<img>`, so rows always size to content and never overlap when the grid scrolls. Verified with Playwright: no overlap at 1440/820/390, no floor scrollbar on normal screens, scrollbar-color resolves to the correct per-theme color.
+
 - "Make the dancefloor selection smaller, still images 100% bigger, 3 in a row, dancefloor portion smaller (set list bigger); fully responsive + mobile; and fix the 7 broken converted dances (collapsed ankles, no elbows) — verify before reporting." + "I've re-added the animation files (different names) to the add folder" — three parts:
   - **Dance-floor picker:** split changed from 60/40 to **70/30** (Set List bigger), grid is now **3 thumbnails per row** and larger (`repeat(3,1fr)`).
   - **Responsive:** reworked breakpoints — ≤900px stacks dancer/set-list/floor in one column (page scrolls, floors stay 3-up); added a ≤480px phone tier (tighter chrome, dancer 42vh). Verified at 1440/820/390px, 3-up at every width, no console errors.
