@@ -26,10 +26,11 @@ explicit categories (see below) and only dances are listed.
 - **IDLE** — `VRMA_01` (intro walk-in) + `VRMA_02..07` (Greeting, Peace sign, Shoot, Spin, Model pose,
   Squat). Auto-cycle via the mixer `finished` event whenever no dance is selected — exactly the ambient
   behaviour from the old project, minus the random rare-dance auto-fire (dances are manual now).
-- **DANCE** — `OtonaBlue`, `BabyYou`, `TocaToca`, `RareDance_3`, `RareDance_5`, `RabbitHole`, `Soiree`, `Kidding`,
-  `BoomBoom`, `SakuyuiTaiso`, `Flower`, `BounceDance`, `March`. Triggered by name from
-  the UI (`playDance(name)`), **looped** while the matching `music/<name>.mp3` plays. When the track
-  ends (or Stop is pressed) `idle()` crossfades back to the idle cycle.
+- **DANCE** — `OtonaBlue`, `BabyYou`, `TocaToca`, `RareDance_3`, `RareDance_5`, `Soiree`. Triggered by name
+  from the UI (`playDance(name)`), **looped** while the matching `music/<name>.mp3` plays. When the track
+  ends (or Stop is pressed) `idle()` crossfades back to the idle cycle. (A batch of TikTok-mocap dances
+  — RabbitHole, Kidding, BoomBoom, SakuyuiTaiso, Flower, BounceDance, March — was added then later
+  removed at the user's request; the conversion tooling below remains for adding new ones.)
 
 ### Models (`app.js` MODELS + `assets/models/`)
 - The dancer is swappable. `MODELS` lists `{ id, name, url, idles }`; the current avatar is `Sakura`
@@ -45,7 +46,7 @@ explicit categories (see below) and only dances are listed.
   (no `.vrm`), which need a Unity + UniVRM export first; those are skipped until a `.vrm` is provided.
 
 ### Dance floor (`app.js` + `assets/dancefloor/`)
-- Right column is split: **Set List** (60%) + **Dance Floor** picker (40%, 6 first-frame thumbnails).
+- Right column is a 3-panel stack: **Set List** (50%) + **Models** (25%) + **Dance Floor** picker (25%, 6 first-frame thumbnails).
 - `FLOORS` lists `floor1..6`; the picked id persists in `groove.floor`. A single `<video id="floor">`
   sits over the still image (`face-bg.jpg`); `showFloor()`/`hideFloor()` toggle `.is-active` to crossfade
   the selected `assets/dancefloor/<id>.mp4` in when a dance starts and back to the still image when it ends.
@@ -56,6 +57,8 @@ explicit categories (see below) and only dances are listed.
   the dance wind up) starts `music/<id>.mp3` at 60 % volume.
 - The audio is routed through a Web Audio `AnalyserNode` to drive the HUD spectrum strip.
 - Mute toggle (header) applies to the music; theme toggle persists in `groove.theme`.
+- All `music/*.mp3` are loudness-normalised to **−16 LUFS** (two-pass EBU R128 `loudnorm`, TP −1.5, LRA 11)
+  so dances don't jump in volume between tracks.
 
 ---
 
@@ -67,8 +70,9 @@ Bootstrap only: CSP, an import map for `three` / `three/addons` / `@pixiv/three-
 No COOP/COEP reload dance anymore (WebGL doesn't need `SharedArrayBuffer`).
 
 ### `app.js`
-The controller. Defines `DANCES` (the Set List source of truth), builds the list, plays dance + music,
-draws the spectrum visualizer, and wires mute / theme / install / cursor-gaze. ~190 lines, no workers.
+The controller. Defines `DANCES` (Set List), `MODELS` (dancer picker) and `FLOORS` (dance-floor picker)
+as the sources of truth, builds those lists, plays dance + music, draws the spectrum visualizer, and wires
+mute / theme / install / cursor-gaze. No workers.
 
 ### `face.js` — VRM character & animation
 - Body animation from **VRMA mocap clips** via `@pixiv/three-vrm-animation`.
@@ -85,8 +89,8 @@ grain, two themes). Set-list rows with a play glyph + per-row equalizer on the a
 
 ### `sw.js`
 Offline service worker: shell precache (from `shell-files.json`), network-first for code,
-stale-while-revalidate for static assets (`vrm/vrma/img/mp3/font`), cache-first for the CDN. Cache
-`groove-v1`. The old COOP/COEP injection and "cache everything" message handler are gone.
+stale-while-revalidate for static assets (`vrm/vrma/img/audio/video/font`, incl. `.mp4`), cache-first for
+the CDN. Cache `groove-v2`. The old COOP/COEP injection and "cache everything" message handler are gone.
 
 ### `assets/vrma/` — animation library
 | File | Source | Category |
@@ -139,20 +143,30 @@ Soirée from its `.anim` now matches the authored `.vrma` within ~0.1° (spine) 
 4. Add both paths to `shell-files.json` for offline precache.
 
 ## Layout & responsiveness (`styles.css`)
-- Desktop `.stage` is a 2-column grid (dancer ~62% · right column ~38%). The right column (`.rightcol`)
-  is a flex stack: **Set List 70%** + **Dance Floor picker 30%** (`flex:7` / `flex:3`); the floor grid is
-  **3 thumbnails per row**.
-- ≤900px: single column — dancer (48vh) over Set List over Dance Floor, page scrolls; floors stay 3-up.
-- ≤480px (phones): tighter chrome (subtitle hidden, smaller track rows), dancer 42vh, floors still 3-up.
+- Desktop `.stage` is a 2-column grid (dancer · right column). The right column (`.rightcol`) is a flex
+  stack: **Set List 50%** + **Models 25%** + **Dance Floor 25%** (`flex:2`/`flex:1`/`flex:1`). The Models
+  and Dance-Floor grids are **3 thumbnails per row** with `grid-auto-rows:1fr`, so they always *fill* their
+  panel (no dead space, no scrollbar) and scale with the window.
+- ≤900px: single column — dancer (48vh) over Set List → Models → Dance Floor, page scrolls; grids stay
+  3-up (model thumbs go 3:4, floor thumbs 16:9).
+- ≤480px (phones): tighter chrome (subtitle hidden, smaller track rows), dancer 42vh.
+- Scrollbars are themed (`scrollbar-color` + webkit thumb via `--line2`/`--muted`) so they follow dark/light.
 
 ## Dancer foot anchor (`face.js`)
 Some converted clips carry vertical root translation. `anchorFeet()` pins the lowest foot bone to a
 floor line measured once at rest: a **hard floor** downward (no sinking, corrected same-frame) plus a
 **soft** upward pull (hops still read). Keeps every clip's apparent bottom within a few px.
 
+## Deployment (GitHub Pages)
+Hosted at **https://barkeeper.github.io/groove-galaxy/** — served from the `master` branch root of
+`barkeeper/groove-galaxy` (git remote `groove`; `.nojekyll` disables Jekyll processing). Every asset path is
+relative (`./…`), so it works under the `/groove-galaxy/` subpath with no changes. Push updates with
+`git push groove master` and Pages rebuilds automatically. (The unrelated `origin` remote points at a
+different project and is left untouched.)
+
 ## Testing
 ```
-python -m http.server 5173                 # dev server
+node tools/serve.mjs                        # no-store dev server on :5173 (or `python -m http.server 5173`)
 # In DevTools:
 __face.status()                            # idle/dance counts, current clip
 __face.playDance('BabyYou')                # fire a dance now
@@ -163,4 +177,6 @@ __face.playDance('BabyYou')                # fire a dance now
   (https://hub.vroid.com/en/characters/6508184899432541268/models/2853061186142051617)
 - **VRMA Motion Pack (intro + idle)** — pixiv VRoid Project — credit phrase required:
   *"Animation credits to pixiv Inc.'s VRoid Project"*
-- **Dance clips** — user-supplied (VRChat-community VRMA pack)
+- **Dance clips** — `OtonaBlue / BabyYou / TocaToca / RareDance_3 / RareDance_5` from a user-supplied VRMA
+  pack; `Soiree` (「ソワレ」 / Hoshimachi Suisei) ships a hand-authored `.vrma` on BOOTH.
+- **Extra models** — Kamome (鴨目カモメ) and Papeko (ぱペコ), free BOOTH avatars, in `assets/models/`.
