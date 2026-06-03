@@ -27,6 +27,8 @@
   "./music/TocaToca.mp3",
   "./music/RareDance_3.mp3",
   "./music/RareDance_5.mp3",
-  "./assets/vrma/pokedance.vrma",
-  "./music/pokedance.mp3"
+  "./assets/vrma/PokemonBuiltin.vrma",
+  "./music/PokemonBuiltin.mp3",
+  "./assets/vrma/PokemonKolido.vrma",
+  "./music/PokemonKolido.mp3"
 ]

@@ -6,10 +6,16 @@ landmarks JSON.
 
 ```
 youtube url ─▶ fetch.py  ─▶ music/<id>.mp3 (−16 LUFS) + tmp/<id>.mp4
-tmp/<id>.mp4 ─▶ pose.py   ─▶ out/<id>.landmarks.json   (MediaPipe 3D world landmarks)
-landmarks    ─▶ retarget.mjs ─▶ assets/vrma/<id>.vrma  (swing solve + foot leveling + smoothing)
-             ─▶ run.mjs wires DANCE_CLIPS / DANCES / shell-files.json
+tmp/<id>.mp4 ─▶ pose.py   ─▶ out/<id>.landmarks.json   (MediaPipe world + image landmarks)
+landmarks    ─▶ retarget (--engine builtin|kalido) ─▶ assets/vrma/<id>.vrma
+             ─▶ run.mjs wires DANCE_CLIPS / DANCES / shell-files.json / NO_ANCHOR
 ```
+
+**Two retarget engines** (sharing `common.mjs` for hip translation, FK foot-leveling, smoothing, pack):
+- **builtin** (`retarget.mjs`) — bend-plane basis solver: bone direction + roll pinned by the joint
+  bend normal (`upperDir×lowerDir`), so elbows/knees bend in-plane and hands don't twist through.
+- **kalido** (`retarget-kalido.mjs`) — the Kalidokit Pose solver (3D+2D landmarks → local Eulers).
+Build both from one capture with `--reuse` to compare and pick the better one.
 
 ## One-time setup
 
@@ -19,6 +25,7 @@ MediaPipe has no wheel for Python 3.13, so the venv uses Python 3.10. `ffmpeg` i
 ```bash
 py -3.10 -m venv tools/video-to-dance/.venv
 tools/video-to-dance/.venv/Scripts/python.exe -m pip install mediapipe opencv-python numpy yt-dlp imageio-ffmpeg
+npm install kalidokit          # engine B (MIT)
 # pose model (heavy ~29 MB):
 curl -L -o tools/video-to-dance/models/pose_landmarker_heavy.task \
   https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/latest/pose_landmarker_heavy.task
@@ -32,19 +39,20 @@ with the artist taken from the uploader. Feet are **not anchored** by default (p
 ```bash
 node tools/video-to-dance/run.mjs "<youtube-url>"                      # auto-name from the video title
 node tools/video-to-dance/run.mjs "<youtube-url>" pokedance           # explicit id
-node tools/video-to-dance/run.mjs "<url>" pokedance --title "Pokédance" --artist "…"
-# tuning re-runs (reuse cached download / landmarks — pass the id so paths match):
-node tools/video-to-dance/run.mjs "<url>" pokedance --skip-fetch            # re-pose + retarget
-node tools/video-to-dance/run.mjs "<url>" pokedance --skip-fetch --skip-pose # retarget only
+node tools/video-to-dance/run.mjs "<url>" Pokemon --engine kalido --title "Pokémon"
+# two engine variants from ONE capture (no re-download/pose):
+node tools/video-to-dance/run.mjs "<url>" PokemonBuiltin --engine builtin
+node tools/video-to-dance/run.mjs "<url>" PokemonKolido  --engine kalido --reuse PokemonBuiltin
+# tuning re-runs: --skip-fetch (re-pose+retarget) or --skip-fetch --skip-pose (retarget only)
 ```
 Then reload the app and tap the new row in the Set List.
 
-## Tuning (in `retarget.mjs`)
-- `AXIS` / `FLIP_HANDED` — fix a mirrored or upside-down pose (sign flips on the MediaPipe→VRM map).
-- `SMOOTH_ALPHA` — lower = smoother (more lag); higher = snappier (more jitter).
-- `FOOT_LEVEL` — keep soles flat (default) vs. use the noisy foot landmarks.
+## Tuning
+- **builtin** (`retarget.mjs`): `ARM`/`LEG` hinge signs (flip if a joint inverts); `common.AXIS`
+  (a 180° Y flip faces the camera). **kalido** (`retarget-kalido.mjs`): `FLIP` / `HIPS_YAW_DEG`.
+- `common.smoothTrack` alpha — lower = smoother (more lag); higher = snappier (more jitter).
 
 ## Quality / non-goals
-Single, mostly front-facing dancer. No multi-person, fingers, face, or limb twist. World landmarks are
-hip-centred so global translation (steps/jumps) is dropped — the dance plays in place (feet anchored by
-the app). Fast 360° spins, floor work, occlusion, motion blur, and camera cuts degrade or pop.
+Single dancer. No multi-person, fingers, face, or limb twist. Both engines pin limb roll (bend plane /
+Kalidokit) so hands stop passing through the body; feet are levelled flat and lift freely (not anchored).
+Fast 360° spins, occlusion, motion blur, and camera cuts still degrade or pop.

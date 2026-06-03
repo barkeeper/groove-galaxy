@@ -152,21 +152,30 @@ Three stages, decoupled by an intermediate landmarks JSON, all free/OSS:
 2. **`pose.py`** — MediaPipe **PoseLandmarker (heavy)** in a Python **3.10** venv (3.13 has no wheel)
    emits per-frame 3D **world** landmarks (for rotations) + normalized **image** landmarks (for global
    hip motion) to `out/<id>.landmarks.json`.
-3. **`retarget.mjs`** — landmarks → VRM humanoid **local quaternions**: a per-limb swing solve
-   (`quatFromTo(restDir, jointDir)`) localised down the hierarchy (`qLocal = inv(parentWorld)·boneWorld`),
-   hips basis from the torso, **feet levelled flat**, hip translation reconstructed from image space
-   (sway/bob/jump, mean-removed → no drift, on top of the rest hip height so she never sinks),
-   zero-phase EMA smoothing, then packed via the shared **`tools/vrma-writer.mjs`** (the GLB +
-   `VRMC_vrm_animation` writer factored out of `unity-anim-to-vrma.mjs`).
+3. **retarget** — landmarks → VRM humanoid **local quaternions**, via one of **two selectable engines**
+   (`--engine builtin|kalido`) that share `common.mjs` (axis convert, image-space hip translation,
+   **FK foot-leveling**, zero-phase smoothing, pack):
+   - **builtin** (`retarget.mjs`) — a **bend-plane basis solver**: each limb bone's world rotation is
+     built from a full orthonormal basis (primary = bone direction, hinge local axis = the joint bend
+     normal `upperDir×lowerDir`), so elbows/knees bend in the observed plane and **roll is pinned**
+     (no hands twisting through the torso). Localised `qLocal = inv(parentWorld)·boneWorld`; hips/torso
+     from the body basis. Learned from the existing VRMAs: rest = T-pose (arms ±X), knee hinge = local X.
+   - **kalido** (`retarget-kalido.mjs`) — the **Kalidokit** Pose solver (MIT) consumes 3D world + 2D
+     image landmarks and returns clean local Euler rotations for hips/spine/arms/legs/wrists; feet are
+     levelled, the rest left at rest.
+   Both pack via the shared **`tools/vrma-writer.mjs`** (GLB + `VRMC_vrm_animation`, factored out of
+   `unity-anim-to-vrma.mjs`). Hip translation is reconstructed from image space (sway/bob/jump,
+   mean-removed → no drift, on top of the rest hip height so she never sinks).
 
 `run.mjs` orchestrates all three, **auto-names** the dance from the video title (slugified CamelCase,
-uploader as artist) when no id is given, and idempotently wires `DANCE_CLIPS` / `DANCES` /
-`shell-files.json` **+ `NO_ANCHOR`** in `face.js` (video dances skip `anchorFeet()` so feet can leave
-the floor; pass `--anchor` to opt out). Tunables in `retarget.mjs`: `AXIS`/`FLIP_HANDED` (mirrored or
-facing-away pose — a 180° Y flip makes her face the camera), `SMOOTH_ALPHA`, `TRANS_SCALE`/`TRANS_AXES`,
-`FOOT_LEVEL`. **Quality is approximate**: one front-facing dancer, no fingers/face/twist; fast spins,
-floor work, occlusion and camera cuts degrade. The venv, the 29 MB pose model, `tmp/` and `out/` are
-git-ignored (regenerate via `run.mjs`); see `tools/video-to-dance/README.md` for setup.
+uploader as artist) when no id is given, supports `--reuse <id>` (retarget a second dance from one
+capture without re-downloading/posing — used to build the two engine variants), and idempotently wires
+`DANCE_CLIPS` / `DANCES` / `shell-files.json` **+ `NO_ANCHOR`** in `face.js` (video dances skip
+`anchorFeet()` so feet can leave the floor; pass `--anchor` to opt out). Tunables: builtin `ARM`/`LEG`
+hinge signs + `common.AXIS` (a 180° Y flip faces the camera); kalido `FLIP`/`HIPS_YAW_DEG`.
+**Quality is approximate**: one dancer, no fingers/face/twist; fast spins, floor work, occlusion and
+camera cuts degrade. The venv, the 29 MB pose model, `tmp/` and `out/` are git-ignored (regenerate via
+`run.mjs`); see `tools/video-to-dance/README.md` for setup.
 
 ## Layout & responsiveness (`styles.css`)
 - Desktop `.stage` is a 2-column grid (dancer · right column). The right column (`.rightcol`) is a flex

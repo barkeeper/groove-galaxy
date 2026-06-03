@@ -16,7 +16,7 @@ const model = path.join(here, 'models', 'pose_landmarker_heavy.task');
 
 // parse: <url> [id]  with --title/--artist taking a value, everything else a flag
 const raw = process.argv.slice(2);
-const VALUE_OPTS = new Set(['title', 'artist']);
+const VALUE_OPTS = new Set(['title', 'artist', 'engine', 'reuse']);
 const flags = new Set();
 const opts = {};
 const pos = [];
@@ -26,7 +26,7 @@ for (let i = 0; i < raw.length; i++) {
   else pos.push(a);
 }
 const url = pos[0];
-if (!url) { console.error('usage: node run.mjs <youtube-url> [id] [--title T] [--artist A] [--anchor] [--skip-fetch] [--skip-pose]'); process.exit(2); }
+if (!url) { console.error('usage: node run.mjs <youtube-url> [id] [--title T] [--artist A] [--engine builtin|kalido] [--reuse <id>] [--anchor] [--skip-fetch] [--skip-pose]'); process.exit(2); }
 
 // slugify a video title into a safe CamelCase dance id
 function slugify(s) {
@@ -59,13 +59,25 @@ if (!id || !title || !artist) {
 }
 if (!id) { console.error('could not derive an id; pass one explicitly'); process.exit(2); }
 const noAnchor = !flags.has('--anchor');   // video dances carry their own foot motion by default
+const engine = (opts.engine || 'builtin').toLowerCase();   // builtin | kalido
+const RETARGETER = { builtin: 'retarget.mjs', kalido: 'retarget-kalido.mjs' }[engine];
+if (!RETARGETER) { console.error(`unknown --engine '${engine}' (use builtin | kalido)`); process.exit(2); }
+const reuse = opts.reuse;   // reuse another id's capture (landmarks + audio) instead of fetching/posing
 
-const landmarks = path.join(here, 'out', `${id}.landmarks.json`);
+const landmarks = path.join(here, 'out', `${reuse || id}.landmarks.json`);
 const vrma = path.join(root, 'assets', 'vrma', `${id}.vrma`);
 const mp3 = path.join(root, 'music', `${id}.mp3`);
 
 function step(name, fn) { console.log(`\n=== ${name} ===`); const t = Date.now(); fn(); console.log(`(${name} done in ${((Date.now()-t)/1000).toFixed(1)}s)`); }
 function run(cmd, args, opts = {}) { console.log('$', cmd, args.join(' ')); return execFileSync(cmd, args, { stdio: ['inherit', 'pipe', 'inherit'], encoding: 'utf8', ...opts }); }
+
+if (reuse) {
+  // copy the reused capture's audio to this id; landmarks point at the reused file directly
+  const src = path.join(root, 'music', `${reuse}.mp3`);
+  if (fs.existsSync(src) && !fs.existsSync(mp3)) { fs.copyFileSync(src, mp3); console.log(`reuse: copied ${reuse}.mp3 \u2192 ${id}.mp3`); }
+  if (!fs.existsSync(landmarks)) { console.error(`reuse: landmarks not found: ${landmarks}`); process.exit(2); }
+  flags.add('--skip-fetch'); flags.add('--skip-pose');
+}
 
 let videoPath = null;
 if (!flags.has('--skip-fetch')) {
@@ -88,8 +100,8 @@ if (!flags.has('--skip-pose')) {
   });
 }
 
-step('3 retarget (landmarks → vrma)', () => {
-  run(process.execPath, [path.join(here, 'retarget.mjs'), '--in', landmarks, '--out', vrma, '--name', id], { stdio: 'inherit' });
+step(`3 retarget (${engine}: landmarks → vrma)`, () => {
+  run(process.execPath, [path.join(here, RETARGETER), '--in', landmarks, '--out', vrma, '--name', id], { stdio: 'inherit' });
 });
 
 step('4 wire into the app', () => wire(id, title, artist, noAnchor));

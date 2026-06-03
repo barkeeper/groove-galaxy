@@ -39,12 +39,13 @@ const DANCE_CLIPS = [
   'RareDance_3.vrma',
   'RareDance_5.vrma',
   'Soiree.vrma',
-  'pokedance.vrma',
+  'PokemonBuiltin.vrma',
+  'PokemonKolido.vrma',
 ];
 
 // Clips that carry their own foot/root motion (video-captured dances): skip anchorFeet so the
 // feet can actually leave the floor (jumps / steps / squats). run.mjs appends video dances here.
-const NO_ANCHOR = new Set(['pokedance', ]);
+const NO_ANCHOR = new Set(['PokemonKolido', 'PokemonBuiltin', ]);
 
 export async function createFace({ canvas, modelUrl, idleFiles }) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
