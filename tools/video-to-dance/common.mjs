@@ -21,6 +21,32 @@ export const REST_HIPS = [0, 0.95, 0];   // matches HUMANOID_TREE hips translati
 
 export function loadLandmarks(p) { return JSON.parse(fs.readFileSync(p, 'utf8')); }
 
+// Clean the raw landmarks BEFORE solving (both engines): MediaPipe emits garbage positions for
+// low-visibility joints (e.g. an occluded arm → hand flung behind the body). Hold the last confident
+// position across low-vis spans, then lightly EMA-smooth every landmark track (kills depth jitter).
+export function cleanLandmarks(F, { minVis = 0.5, posAlpha = 0.6 } = {}) {
+  const n = F.length, K = 33;
+  for (const key of ['world', 'img']) {
+    if (!F[0][key]) continue;
+    // confidence hold: carry the last good position forward over low-vis frames
+    const last = new Array(K).fill(null);
+    for (let f = 0; f < n; f++) {
+      for (let k = 0; k < K; k++) {
+        if (F[f].vis[k] >= minVis || last[k] === null) last[k] = F[f][key][k].slice();
+        else F[f][key][k] = last[k].slice();
+      }
+    }
+    // zero-phase positional EMA per landmark
+    for (let k = 0; k < K; k++) {
+      let s = F[0][key][k].slice();
+      for (let f = 1; f < n; f++) for (let c = 0; c < 3; c++) { s[c] += posAlpha * (F[f][key][k][c] - s[c]); F[f][key][k][c] = s[c]; }
+      s = F[n-1][key][k].slice();
+      for (let f = n-2; f >= 0; f--) for (let c = 0; c < 3; c++) { s[c] += posAlpha * (F[f][key][k][c] - s[c]); F[f][key][k][c] = s[c]; }
+    }
+  }
+  return F;
+}
+
 // rotation matrix with columns (X,Y,Z basis) -> quaternion [x,y,z,w]
 export function basisToQuat(X, Y, Z) {
   const m00=X[0], m10=X[1], m20=X[2], m01=Y[0], m11=Y[1], m21=Y[2], m02=Z[0], m12=Z[1], m22=Z[2];
@@ -62,13 +88,14 @@ function worldQuat(boneQuats, f, bone) {
   return q;
 }
 
-// level both soles flat to the floor, facing the leg's yaw (works for any engine via FK)
+// level both soles flat to the floor, pointing the way the BODY faces (hips yaw) — symmetric for both
+// feet, so they never end up one-forward/one-backward (the old per-leg twist did). Via FK so it works
+// for any engine.
 export function levelFeetFK(boneQuats, frames) {
   for (let f = 0; f < frames; f++) {
+    const footWorld = twistY(worldQuat(boneQuats, f, 'hips'));   // body facing yaw, flat (no pitch/roll)
     for (const [lo, foot] of [['leftLowerLeg', 'leftFoot'], ['rightLowerLeg', 'rightFoot']]) {
-      const legWorld = worldQuat(boneQuats, f, lo);
-      const footWorld = twistY(legWorld);
-      const parentWorld = worldQuat(boneQuats, f, PARENT[foot]); // = lowerLeg world
+      const parentWorld = worldQuat(boneQuats, f, lo);            // lowerLeg world
       const local = quatNormalize(quatMul(quatConj(parentWorld), footWorld));
       const a = boneQuats.get(foot); a[f*4]=local[0]; a[f*4+1]=local[1]; a[f*4+2]=local[2]; a[f*4+3]=local[3];
     }

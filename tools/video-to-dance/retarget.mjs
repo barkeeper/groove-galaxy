@@ -8,7 +8,7 @@
 //
 // Usage: node retarget.mjs --in <landmarks.json> --out <out.vrma> [--name <id>]
 import {
-  L, conv, basisToQuat, boneBasis, finalizeAndWrite, loadLandmarks,
+  L, conv, basisToQuat, boneBasis, finalizeAndWrite, loadLandmarks, cleanLandmarks,
 } from './common.mjs';
 import {
   HUMANOID_BONES, HUMANOID_TREE,
@@ -24,6 +24,7 @@ const inPath = arg('in'), outPath = arg('out'), name = arg('name', 'clip');
 if (!inPath || !outPath) { console.error('usage: node retarget.mjs --in <landmarks.json> --out <out.vrma> [--name <id>]'); process.exit(2); }
 
 const data = loadLandmarks(inPath);
+cleanLandmarks(data.frames);   // confidence-hold + smooth before solving (kills occluded-arm flailing)
 const F = data.frames, frames = F.length;
 if (frames < 2) { console.error('need >=2 frames'); process.exit(1); }
 

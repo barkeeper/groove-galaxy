@@ -9,7 +9,7 @@
 //
 // Usage: node retarget-kalido.mjs --in <landmarks.json> --out <out.vrma> [--name <id>]
 import * as Kalidokit from '../../node_modules/kalidokit/dist/kalidokit.es.js';
-import { finalizeAndWrite, loadLandmarks } from './common.mjs';
+import { finalizeAndWrite, loadLandmarks, cleanLandmarks } from './common.mjs';
 import { HUMANOID_BONES, quatMul } from '../vrma-writer.mjs';
 
 // orientation correction (Kalidokit was tuned for a mirror/VRM0 facing): flip euler axes + extra hips
@@ -22,6 +22,7 @@ const inPath = arg('in'), outPath = arg('out'), name = arg('name', 'clip');
 if (!inPath || !outPath) { console.error('usage: node retarget-kalido.mjs --in <landmarks.json> --out <out.vrma> [--name <id>]'); process.exit(2); }
 
 const data = loadLandmarks(inPath);
+cleanLandmarks(data.frames);   // confidence-hold + smooth before solving
 const F = data.frames, frames = F.length;
 if (frames < 2) { console.error('need >=2 frames'); process.exit(1); }
 if (!F.every((fr) => fr.img)) { console.error('kalido engine needs image landmarks (re-run pose.py)'); process.exit(1); }
