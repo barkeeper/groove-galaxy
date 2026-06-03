@@ -39,7 +39,12 @@ const DANCE_CLIPS = [
   'RareDance_3.vrma',
   'RareDance_5.vrma',
   'Soiree.vrma',
+  'pokedance.vrma',
 ];
+
+// Clips that carry their own foot/root motion (video-captured dances): skip anchorFeet so the
+// feet can actually leave the floor (jumps / steps / squats). run.mjs appends video dances here.
+const NO_ANCHOR = new Set(['pokedance', ]);
 
 export async function createFace({ canvas, modelUrl, idleFiles }) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
@@ -278,7 +283,10 @@ export async function createFace({ canvas, modelUrl, idleFiles }) {
     lookTarget.position.set(gaze.x * 1.6, gaze.y * 1.1, -3);
 
     vrm.update(dt);   // bone updates, expressions, lookAt, spring physics
-    anchorFeet();     // keep her planted on the floor line (after the rig is posed for this frame)
+    // keep her planted on the floor line — unless this clip carries its own foot motion (video dances)
+    const _cur = currentAction?.getClip()?.name;
+    if (_cur && NO_ANCHOR.has(_cur)) vrm.scene.position.y = 0;
+    else anchorFeet();
 
     renderer.render(scene, camera);
     } catch (e) { // a transient GPU/context hiccup (e.g. under heavy LLM-on-GPU load) must not freeze the avatar

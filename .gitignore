@@ -16,3 +16,9 @@ Thumbs.db
 /node_modules/
 package-lock.json
 shot_*.png
+
+# video-to-dance pipeline scratch (regenerate via tools/video-to-dance/run.mjs)
+/tmp/
+tools/video-to-dance/.venv/
+tools/video-to-dance/models/
+tools/video-to-dance/out/

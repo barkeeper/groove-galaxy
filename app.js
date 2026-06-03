@@ -18,6 +18,7 @@ const DANCES = [
   { id: 'RareDance_3', title: 'Sorry for Being Cute', artist: 'HoneyWorks' },
   { id: 'RareDance_5', title: 'Rhapsody of Blue Sky', artist: 'fhána' },
   { id: 'Soiree',       title: 'Soirée',                            artist: 'Hoshimachi Suisei' },
+  { id: 'pokedance', title: "Pokédance", artist: "Video capture" },
 ];
 
 // Dance floors — animated video backdrops in ./assets/dancefloor/<id>.mp4 (+ <id>.jpg first-frame thumb).

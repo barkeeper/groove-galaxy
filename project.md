@@ -142,6 +142,32 @@ Soirée from its `.anim` now matches the authored `.vrma` within ~0.1° (spine) 
 3. Append `{ id: 'MyDance', title: '…', artist: '…' }` to `DANCES` in `app.js`.
 4. Add both paths to `shell-files.json` for offline precache.
 
+## Adding a dance from a YouTube video (`tools/video-to-dance/`)
+No mocap file needed — a markerless capture pipeline turns a YouTube/Shorts URL into a Set List dance.
+Pasting a URL is the trigger (see `AGENTS.md`): `node tools/video-to-dance/run.mjs "<url>"`.
+
+Three stages, decoupled by an intermediate landmarks JSON, all free/OSS:
+1. **`fetch.py`** — `yt-dlp` downloads the video; `ffmpeg` (bundled via the `imageio-ffmpeg` pip package,
+   no system install) extracts a two-pass **−16 LUFS** MP3 to `music/<id>.mp3`.
+2. **`pose.py`** — MediaPipe **PoseLandmarker (heavy)** in a Python **3.10** venv (3.13 has no wheel)
+   emits per-frame 3D **world** landmarks (for rotations) + normalized **image** landmarks (for global
+   hip motion) to `out/<id>.landmarks.json`.
+3. **`retarget.mjs`** — landmarks → VRM humanoid **local quaternions**: a per-limb swing solve
+   (`quatFromTo(restDir, jointDir)`) localised down the hierarchy (`qLocal = inv(parentWorld)·boneWorld`),
+   hips basis from the torso, **feet levelled flat**, hip translation reconstructed from image space
+   (sway/bob/jump, mean-removed → no drift, on top of the rest hip height so she never sinks),
+   zero-phase EMA smoothing, then packed via the shared **`tools/vrma-writer.mjs`** (the GLB +
+   `VRMC_vrm_animation` writer factored out of `unity-anim-to-vrma.mjs`).
+
+`run.mjs` orchestrates all three, **auto-names** the dance from the video title (slugified CamelCase,
+uploader as artist) when no id is given, and idempotently wires `DANCE_CLIPS` / `DANCES` /
+`shell-files.json` **+ `NO_ANCHOR`** in `face.js` (video dances skip `anchorFeet()` so feet can leave
+the floor; pass `--anchor` to opt out). Tunables in `retarget.mjs`: `AXIS`/`FLIP_HANDED` (mirrored or
+facing-away pose — a 180° Y flip makes her face the camera), `SMOOTH_ALPHA`, `TRANS_SCALE`/`TRANS_AXES`,
+`FOOT_LEVEL`. **Quality is approximate**: one front-facing dancer, no fingers/face/twist; fast spins,
+floor work, occlusion and camera cuts degrade. The venv, the 29 MB pose model, `tmp/` and `out/` are
+git-ignored (regenerate via `run.mjs`); see `tools/video-to-dance/README.md` for setup.
+
 ## Layout & responsiveness (`styles.css`)
 - Desktop `.stage` is a 2-column grid (dancer · right column). The right column (`.rightcol`) is a flex
   stack: **Set List 50%** + **Models 25%** + **Dance Floor 25%** (`flex:2`/`flex:1`/`flex:1`). The Models

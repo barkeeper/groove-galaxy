@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sample, extractCurves, expmapToQuat, quatToLog } from './anim-muscle.mjs';
+import { HUMANOID_TREE, HUMANOID_BONES, quatNormalize, quatMul, quatConj, twistY, writeVrma } from './vrma-writer.mjs';
 
 // Optional empirical calibration produced by tools/calibrate-muscles.mjs from a known-good reference
 // clip: bone -> { muscles:[names in order], M:[3][n], b:[3] }. When present, a calibrated bone's
@@ -90,33 +91,7 @@ const MUSCLES = [
   ['Right Foot Twist In-Out',   'rightFoot',     'y',  30, -30],
 ];
 
-// Humanoid bone hierarchy + approximate VRM-standard rest translations (meters,
-// from parent). three-vrm-animation rebinds these to the target VRM, but a coherent
-// hierarchy with non-zero offsets is required for the rebinding to work.
-// [boneName, parent, [tx,ty,tz]]
-const HUMANOID_TREE = [
-  ['hips',          null,           [0,    0.95, 0   ]],
-  ['spine',         'hips',         [0,    0.10, 0   ]],
-  ['chest',         'spine',        [0,    0.15, 0   ]],
-  ['upperChest',    'chest',        [0,    0.10, 0   ]],
-  ['neck',          'upperChest',   [0,    0.10, 0   ]],
-  ['head',          'neck',         [0,    0.08, 0   ]],
-  ['leftShoulder',  'upperChest',   [ 0.04, 0.08, 0  ]],
-  ['leftUpperArm',  'leftShoulder', [ 0.10, 0,    0  ]],
-  ['leftLowerArm',  'leftUpperArm', [ 0.25, 0,    0  ]],
-  ['leftHand',      'leftLowerArm', [ 0.25, 0,    0  ]],
-  ['rightShoulder', 'upperChest',   [-0.04, 0.08, 0  ]],
-  ['rightUpperArm', 'rightShoulder',[-0.10, 0,    0  ]],
-  ['rightLowerArm', 'rightUpperArm',[-0.25, 0,    0  ]],
-  ['rightHand',     'rightLowerArm',[-0.25, 0,    0  ]],
-  ['leftUpperLeg',  'hips',         [ 0.08,-0.05, 0  ]],
-  ['leftLowerLeg',  'leftUpperLeg', [ 0,   -0.40, 0  ]],
-  ['leftFoot',      'leftLowerLeg', [ 0,   -0.40, 0  ]],
-  ['rightUpperLeg', 'hips',         [-0.08,-0.05, 0  ]],
-  ['rightLowerLeg', 'rightUpperLeg',[ 0,   -0.40, 0  ]],
-  ['rightFoot',     'rightLowerLeg',[ 0,   -0.40, 0  ]],
-];
-const HUMANOID_BONES = HUMANOID_TREE.map(([n]) => n);
+// HUMANOID_TREE / HUMANOID_BONES are imported from ./vrma-writer.mjs (shared with retarget.mjs).
 
 // (extractCurves + sample now live in ./anim-muscle.mjs, shared with the calibration tool.)
 
@@ -142,15 +117,7 @@ function eulerXYZToQuat(rx, ry, rz) {
   ];
 }
 
-function quatNormalize(q) { const l = Math.hypot(q[0], q[1], q[2], q[3]) || 1; return [q[0]/l, q[1]/l, q[2]/l, q[3]/l]; }
-function quatMul(a, b) { return [
-  a[3]*b[0] + a[0]*b[3] + a[1]*b[2] - a[2]*b[1],
-  a[3]*b[1] - a[0]*b[2] + a[1]*b[3] + a[2]*b[0],
-  a[3]*b[2] + a[0]*b[1] - a[1]*b[0] + a[2]*b[3],
-  a[3]*b[3] - a[0]*b[0] - a[1]*b[1] - a[2]*b[2],
-]; }
-function quatConj(q) { return [-q[0], -q[1], -q[2], q[3]]; }   // inverse for a unit quaternion
-function twistY(q) { const n = Math.hypot(q[1], q[3]) || 1; return [0, q[1]/n, 0, q[3]/n]; } // swing-twist: the rotation about world Y (yaw)
+// quatNormalize / quatMul / quatConj / twistY are imported from ./vrma-writer.mjs.
 
 // ---------- main ----------
 const [inPath, outPath] = process.argv.slice(2);
@@ -265,126 +232,6 @@ for (let f = 0; f < frames; f++) {
   }
 }
 
-// Ensure hips has a quaternion track (identity if no muscles drove it)
-if (!boneQuats.has('hips')) boneQuats.set('hips', identityQuats(frames));
-function identityQuats(n) { const a = new Float32Array(n * 4); for (let i = 0; i < n; i++) a[i * 4 + 3] = 1; return a; }
-
-// ---------- build glTF JSON + binary buffer ----------
-// Layout:
-//   nodes: one node per humanoid bone we have. Hierarchy is flat (parent: -1) — VRMA only
-//          needs nodes that map to humanoidBones, the *target VRM* supplies the hierarchy.
-//          (three-vrm-animation rebinds humanoid bones at clip-creation time.)
-//   accessors / bufferViews: time samplers + per-bone rotation samplers + hips translation sampler
-//   animation: channels per bone
-
-// Build full hierarchy: every humanoid bone gets a node, even if unanimated.
-// Hierarchy node indices follow HUMANOID_TREE order.
-const bones = HUMANOID_BONES.slice();
-const boneIdx = (b) => bones.indexOf(b);
-const nodes = HUMANOID_TREE.map(([name, parent, t]) => {
-  const node = { name, translation: t };
-  const childNames = HUMANOID_TREE.filter(([, p]) => p === name).map(([n]) => n);
-  if (childNames.length) node.children = childNames.map(boneIdx);
-  return node;
-});
-// Ensure boneQuats has identity for any humanoid bone the clip didn't drive
-function identityFill() {
-  for (const b of HUMANOID_BONES) {
-    if (!boneQuats.has(b)) {
-      const a = new Float32Array(frames * 4);
-      for (let i = 0; i < frames; i++) a[i * 4 + 3] = 1;
-      boneQuats.set(b, a);
-    }
-  }
-}
-identityFill();
-
-const binChunks = []; const bvList = []; const accList = [];
-let byteOffset = 0;
-
-function pushAccessor(typedArray, componentType, type, count, min = null, max = null) {
-  // Align to 4 bytes per glTF requirement
-  const pad = (4 - (byteOffset % 4)) % 4;
-  if (pad) { binChunks.push(new Uint8Array(pad)); byteOffset += pad; }
-  const buf = Buffer.from(typedArray.buffer, typedArray.byteOffset, typedArray.byteLength);
-  const bvIndex = bvList.length;
-  bvList.push({ buffer: 0, byteOffset, byteLength: buf.byteLength });
-  binChunks.push(buf);
-  byteOffset += buf.byteLength;
-  const acc = { bufferView: bvIndex, componentType, count, type };
-  if (min) acc.min = min; if (max) acc.max = max;
-  accList.push(acc);
-  return accList.length - 1;
-}
-
-// Time accessor (shared by all samplers)
-const timeAcc = pushAccessor(times, 5126, 'SCALAR', frames, [0], [times[frames - 1]]);
-
-const samplers = []; const channels = [];
-
-// hips translation channel
-{
-  const accT = pushAccessor(hipsTrans, 5126, 'VEC3', frames);
-  samplers.push({ input: timeAcc, output: accT, interpolation: 'LINEAR' });
-  channels.push({ sampler: samplers.length - 1, target: { node: boneIdx('hips'), path: 'translation' } });
-}
-
-// rotation channels
-for (const b of bones) {
-  const quats = boneQuats.get(b);
-  const accR = pushAccessor(quats, 5126, 'VEC4', frames);
-  samplers.push({ input: timeAcc, output: accR, interpolation: 'LINEAR' });
-  channels.push({ sampler: samplers.length - 1, target: { node: boneIdx(b), path: 'rotation' } });
-}
-
-const totalBinLen = byteOffset;
-
-const humanoidBones = {};
-for (const b of bones) humanoidBones[b] = { node: boneIdx(b) };
-
-const gltf = {
-  asset: { version: '2.0', generator: 'unity-anim-to-vrma.mjs' },
-  extensionsUsed: ['VRMC_vrm_animation'],
-  extensions: {
-    VRMC_vrm_animation: {
-      specVersion: '1.0',
-      humanoid: { humanBones: humanoidBones },
-    },
-  },
-  scene: 0,
-  scenes: [{ nodes: [boneIdx('hips')] }],
-  nodes,
-  buffers: [{ byteLength: totalBinLen }],
-  bufferViews: bvList,
-  accessors: accList,
-  animations: [{
-    name: 'LoliKamiRequiem',
-    samplers, channels,
-  }],
-};
-
-// ---------- pack as GLB ----------
-const jsonBuf = Buffer.from(JSON.stringify(gltf), 'utf8');
-const jsonPad = (4 - (jsonBuf.length % 4)) % 4;
-const jsonPadded = Buffer.concat([jsonBuf, Buffer.alloc(jsonPad, 0x20)]); // pad with spaces
-const binBuf = Buffer.concat(binChunks);
-const binPad = (4 - (binBuf.length % 4)) % 4;
-const binPadded = Buffer.concat([binBuf, Buffer.alloc(binPad, 0)]);
-
-const header = Buffer.alloc(12);
-header.writeUInt32LE(0x46546C67, 0);   // "glTF"
-header.writeUInt32LE(2, 4);             // version 2
-const totalLen = 12 + 8 + jsonPadded.length + 8 + binPadded.length;
-header.writeUInt32LE(totalLen, 8);
-
-function chunk(typeAscii, payload) {
-  const h = Buffer.alloc(8);
-  h.writeUInt32LE(payload.length, 0);
-  h.writeUInt32LE(typeAscii, 4);
-  return Buffer.concat([h, payload]);
-}
-const jsonChunk = chunk(0x4E4F534A, jsonPadded); // "JSON"
-const binChunk  = chunk(0x004E4942, binPadded);  // "BIN\0"
-
-fs.writeFileSync(outPath, Buffer.concat([header, jsonChunk, binChunk]));
-console.log(`wrote ${outPath} (${(totalLen/1024).toFixed(1)} KB, ${frames} frames, ${bones.length} bones)`);
+// ---------- pack as VRMA via the shared writer ----------
+const res = writeVrma({ times, boneQuats, hipsTrans, name: 'LoliKamiRequiem' }, outPath);
+console.log(`wrote ${outPath} (${(res.totalLen/1024).toFixed(1)} KB, ${res.frames} frames, ${res.bones} bones)`);
