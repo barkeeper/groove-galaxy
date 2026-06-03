@@ -1,7 +1,11 @@
 // run.mjs — orchestrate the video→dance pipeline end to end and register the dance.
 //
-//   node tools/video-to-dance/run.mjs <youtube-url> <id> [--title "T"] [--artist "A"]
-//        [--skip-fetch] [--skip-pose]    (re-use cached intermediates while tuning)
+//   node tools/video-to-dance/run.mjs <youtube-url> [id] [--both] [--engine builtin|kalido]
+//        [--title "T"] [--artist "A"] [--anchor] [--skip-fetch] [--skip-pose] [--reuse <id>]
+//
+//   --both  rips the audio + captures ONCE and produces BOTH engine variants
+//           (<id>Builtin via the builtin solver, <id>Kalido via Kalidokit reusing the same
+//           capture). This is the default action when a YouTube URL is pasted (see AGENTS.md).
 //
 // Stages: fetch.py (mp3 + video) → pose.py (landmarks json) → retarget.mjs (vrma) → wire app.
 import { execFileSync } from 'node:child_process';
@@ -26,7 +30,7 @@ for (let i = 0; i < raw.length; i++) {
   else pos.push(a);
 }
 const url = pos[0];
-if (!url) { console.error('usage: node run.mjs <youtube-url> [id] [--title T] [--artist A] [--engine builtin|kalido] [--reuse <id>] [--anchor] [--skip-fetch] [--skip-pose]'); process.exit(2); }
+if (!url) { console.error('usage: node run.mjs <youtube-url> [id] [--both] [--engine builtin|kalido] [--title T] [--artist A] [--reuse <id>] [--anchor] [--skip-fetch] [--skip-pose]'); process.exit(2); }
 
 // slugify a video title into a safe CamelCase dance id
 function slugify(s) {
@@ -58,6 +62,26 @@ if (!id || !title || !artist) {
   console.log(`name from video \u2192 id='${id}'  title='${title}'  artist='${artist}'`);
 }
 if (!id) { console.error('could not derive an id; pass one explicitly'); process.exit(2); }
+
+// --both: rip audio + capture ONCE, then deliver BOTH engine variants (paste-a-URL default).
+if (flags.has('--both')) {
+  const base = id;
+  const self = fileURLToPath(import.meta.url);
+  const keepAnchor = flags.has('--anchor');
+  const variants = [
+    { id: base + 'Builtin', engine: 'builtin', title: `${title} \u00b7 Built-in`, extra: [] },
+    { id: base + 'Kalido',  engine: 'kalido',  title: `${title} \u00b7 Kalidokit`, extra: ['--reuse', base + 'Builtin'] },
+  ];
+  for (const v of variants) {
+    const args = [self, url, v.id, '--engine', v.engine, '--title', v.title, '--artist', artist, ...v.extra];
+    if (keepAnchor) args.push('--anchor');
+    console.log(`\n############ ${v.engine.toUpperCase()} \u2192 ${v.id} ############`);
+    execFileSync(process.execPath, args, { stdio: 'inherit' });
+  }
+  console.log('\n\u2705 both engines done. Reload and compare the two new dances in the Set List.');
+  process.exit(0);
+}
+
 const noAnchor = !flags.has('--anchor');   // video dances carry their own foot motion by default
 const engine = (opts.engine || 'builtin').toLowerCase();   // builtin | kalido
 const RETARGETER = { builtin: 'retarget.mjs', kalido: 'retarget-kalido.mjs' }[engine];

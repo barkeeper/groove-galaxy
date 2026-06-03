@@ -153,8 +153,8 @@ Three stages, decoupled by an intermediate landmarks JSON, all free/OSS:
    emits per-frame 3D **world** landmarks (for rotations) + normalized **image** landmarks (for global
    hip motion) to `out/<id>.landmarks.json`.
 3. **retarget** — landmarks → VRM humanoid **local quaternions**, via one of **two selectable engines**
-   (`--engine builtin|kalido`) that share `common.mjs` (axis convert, image-space hip translation,
-   **FK foot-leveling**, zero-phase smoothing, pack):
+   (`--engine builtin|kalido`) that share `common.mjs` (landmark **cleaning**, axis convert, image-space
+   hip translation, **symmetric FK foot-leveling**, zero-phase smoothing, pack):
    - **builtin** (`retarget.mjs`) — a **bend-plane basis solver**: each limb bone's world rotation is
      built from a full orthonormal basis (primary = bone direction, hinge local axis = the joint bend
      normal `upperDir×lowerDir`), so elbows/knees bend in the observed plane and **roll is pinned**
@@ -163,16 +163,31 @@ Three stages, decoupled by an intermediate landmarks JSON, all free/OSS:
    - **kalido** (`retarget-kalido.mjs`) — the **Kalidokit** Pose solver (MIT) consumes 3D world + 2D
      image landmarks and returns clean local Euler rotations for hips/spine/arms/legs/wrists; feet are
      levelled, the rest left at rest.
+
+   **Landmark cleaning (`cleanLandmarks`, both engines):** MediaPipe emits *garbage* positions for
+   low-visibility joints — e.g. an occluded arm (this capture's right wrist drops to 0.09 visibility) gets
+   flung **behind the body**. So before solving we **confidence-hold** every joint (carry its last
+   confident position across low-vis spans) then **zero-phase EMA-smooth** all 33 landmark tracks (world
+   + image), which also removes depth jitter. **Symmetric feet:** the foot leveller flattens both soles
+   and points them along the **hips yaw** (not each leg's own twist, which was opposite-handed per side
+   and produced one-foot-forward/one-back), so feet are always grounded and facing forward.
    Both pack via the shared **`tools/vrma-writer.mjs`** (GLB + `VRMC_vrm_animation`, factored out of
    `unity-anim-to-vrma.mjs`). Hip translation is reconstructed from image space (sway/bob/jump,
    mean-removed → no drift, on top of the rest hip height so she never sinks).
 
 `run.mjs` orchestrates all three, **auto-names** the dance from the video title (slugified CamelCase,
-uploader as artist) when no id is given, supports `--reuse <id>` (retarget a second dance from one
-capture without re-downloading/posing — used to build the two engine variants), and idempotently wires
-`DANCE_CLIPS` / `DANCES` / `shell-files.json` **+ `NO_ANCHOR`** in `face.js` (video dances skip
-`anchorFeet()` so feet can leave the floor; pass `--anchor` to opt out). Tunables: builtin `ARM`/`LEG`
-hinge signs + `common.AXIS` (a 180° Y flip faces the camera); kalido `FLIP`/`HIPS_YAW_DEG`.
+uploader as artist) when no id is given, and idempotently wires `DANCE_CLIPS` / `DANCES` /
+`shell-files.json` **+ `NO_ANCHOR`** in `face.js` (video dances skip `anchorFeet()` so feet can leave the
+floor; pass `--anchor` to opt out).
+
+**Pasting a YouTube URL runs `--both` (the default action — see `AGENTS.md`):** it rips the audio and
+captures the pose **once**, then delivers **both engine variants** — `<Name>Builtin` (bend-plane) and
+`<Name>Kalido` (Kalidokit, built from the same capture via `--reuse`) — each with its own normalised
+`music/<id>.mp3` and Set-List entry, so the two can be compared and the better one kept. (`--reuse <id>`
+retargets a second dance from one capture without re-downloading/posing; `--both` is just that wired up.)
+The first delivered pair was **Pokémon · Built-in** + **Pokémon · Kalidokit** from one Shorts capture.
+Tunables: builtin `ARM`/`LEG` hinge signs + `common.AXIS` (negate X+Z for a 180° Y flip → faces the
+camera); kalido `FLIP` + `HIPS_YAW_DEG` (±180 turns her around).
 **Quality is approximate**: one dancer, no fingers/face/twist; fast spins, floor work, occlusion and
 camera cuts degrade. The venv, the 29 MB pose model, `tmp/` and `out/` are git-ignored (regenerate via
 `run.mjs`); see `tools/video-to-dance/README.md` for setup.
