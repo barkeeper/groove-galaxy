@@ -15,7 +15,7 @@ import { HUMANOID_BONES, quatMul } from '../vrma-writer.mjs';
 // orientation correction (Kalidokit was tuned for a mirror/VRM0 facing): flip euler axes + extra hips
 // yaw so she faces the camera, un-mirrored. Tuned from screenshots.
 const FLIP = { x: 1, y: -1, z: -1 };   // per-axis euler sign
-const HIPS_YAW_DEG = 180;              // extra yaw on hips so she faces the camera
+const HIPS_YAW_DEG = 0;                 // extra yaw on hips so she faces the camera (±180 turns around)
 
 function arg(n, d) { const i = process.argv.indexOf('--' + n); return i >= 0 ? process.argv[i + 1] : d; }
 const inPath = arg('in'), outPath = arg('out'), name = arg('name', 'clip');

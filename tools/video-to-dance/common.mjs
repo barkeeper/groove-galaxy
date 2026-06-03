@@ -12,8 +12,9 @@ import {
 export const L = { NOSE:0, LS:11, RS:12, LE:13, RE:14, LW:15, RW:16, LIdx:19, RIdx:20,
                    LH:23, RH:24, LK:25, RK:26, LA:27, RA:28, LHeel:29, RHeel:30, LFI:31, RFI:32 };
 
-// MediaPipe world (x right, y down, z toward cam) -> VRM world (Y up, faces +Z); 180° about Y.
-export const AXIS = { sx: -1, sy: -1, sz: 1 };
+// MediaPipe world (x right, y down, z toward cam) -> VRM world (Y up). Used only by the builtin
+// engine. {sx:1, sz:-1} faces the camera for this capture; flip both to turn her 180° about Y.
+export const AXIS = { sx: 1, sy: -1, sz: -1 };
 export const conv = (p, a = AXIS) => [p[0]*a.sx, p[1]*a.sy, p[2]*a.sz];
 
 export const REST_HIPS = [0, 0.95, 0];   // matches HUMANOID_TREE hips translation
